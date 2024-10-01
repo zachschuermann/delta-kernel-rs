@@ -40,9 +40,15 @@ impl<E: TaskExecutor> FileSystemClient for ObjectStoreFileSystemClient<E> {
         path: &Url,
     ) -> DeltaResult<Box<dyn Iterator<Item = DeltaResult<FileMeta>>>> {
         let url = path.clone();
-        let offset = Path::from(path.path());
-        // TODO properly handle table prefix
-        let prefix = self.table_root.child("_delta_log");
+
+        // parse the path so that we split it into a prefix (the directory) and the offset (the
+        // prefix of a  file)
+        // e.g. if the path is /foo/bar/baz, then the prefix is /foo/bar and the offset is baz
+        let prefix = path.parent()?;
+        let offset = path.file_name()?;
+
+        println!("Listing: {prefix} with offset {offset}");
+        panic!();
 
         let store = self.inner.clone();
 
