@@ -11,6 +11,7 @@ use std::sync::Arc;
 use tracing::debug;
 use url::Url;
 
+use delta_kernel::schema::Schema;
 use delta_kernel::snapshot::Snapshot;
 use delta_kernel::transaction::{CommitResult, Transaction};
 use delta_kernel::{DeltaResult, Engine, EngineData, Table};
@@ -325,6 +326,9 @@ pub unsafe extern "C" fn free_bool_slice(slice: KernelBoolSlice) {
 pub unsafe extern "C" fn free_row_indexes(slice: KernelRowIndexArray) {
     let _ = slice.into_vec();
 }
+
+#[handle_descriptor(target=Schema, mutable=false, sized=true)]
+pub struct SharedSchema;
 
 // TODO: Do we want this handle at all? Perhaps we should just _always_ pass raw *mut c_void pointers
 // that are the engine data? Even if we want the type, should it be a shared handle instead?
@@ -703,15 +707,70 @@ pub unsafe extern "C" fn free_transaction(txn: Handle<ExclusiveTransaction>) {
 ///
 /// # Safety
 ///
-/// Caller is responsible for passing a valid handle. CONSUMES TRANSACTION
+/// Caller is responsible for passing a valid handle. CONSUMES TRANSACTION and commit info
 #[no_mangle]
 pub unsafe extern "C" fn with_commit_info(
     txn: Handle<ExclusiveTransaction>,
-    commit_info: *mut c_void,
+    commit_info: Handle<ExclusiveEngineData>,
 ) -> Handle<ExclusiveTransaction> {
     let txn = unsafe { txn.into_inner() };
-    let commit_info = unsafe { Box::from_raw(commit_info as *mut ArrowEngineData) };
+    let commit_info = unsafe { commit_info.into_inner() };
     Box::new(txn.with_commit_info(commit_info)).into()
+}
+
+use delta_kernel::transaction::WriteContext;
+
+#[handle_descriptor(target=WriteContext, mutable=false, sized=true)]
+pub struct SharedWriteContext;
+
+#[no_mangle]
+pub unsafe extern "C" fn get_write_context(
+    txn: Handle<ExclusiveTransaction>,
+) -> Handle<SharedWriteContext> {
+    let txn = unsafe { txn.as_ref() };
+    Arc::new(txn.get_write_context()).into()
+}
+
+/// TODO
+///
+/// # Safety
+/// Engine is responsible for providing a valid WriteContext pointer
+#[no_mangle]
+pub unsafe extern "C" fn get_write_schema(
+    write_context: Handle<SharedWriteContext>,
+) -> Handle<SharedSchema> {
+    let write_context = unsafe { write_context.as_ref() };
+    write_context.schema().clone().into()
+}
+
+/// TODO
+///
+/// # Safety
+/// Engine is responsible for providing a valid WriteContext pointer
+#[no_mangle]
+pub unsafe extern "C" fn get_write_path(
+    write_context: Handle<SharedWriteContext>,
+    allocate_fn: AllocateStringFn,
+) -> NullableCvoid {
+    let write_context = unsafe { write_context.as_ref() };
+    let write_path = write_context.target_dir().to_string();
+    allocate_fn(kernel_string_slice!(write_path))
+}
+
+/// TODO
+///
+/// # Safety
+///
+/// Caller is responsible for passing a valid handle. Assumes no concurrent txn usage. Consumes
+/// write_metadata.
+#[no_mangle]
+pub unsafe extern "C" fn add_write_metadata(
+    mut txn: Handle<ExclusiveTransaction>,
+    write_metadata: Handle<ExclusiveEngineData>,
+) {
+    let txn = unsafe { txn.as_mut() };
+    let write_metadata = unsafe { write_metadata.into_inner() };
+    txn.add_write_metadata(write_metadata);
 }
 
 /// TODO
@@ -737,60 +796,6 @@ pub unsafe extern "C" fn commit(
         Err(e) => Err(e),
     }
     .into_extern_result(&extern_engine)
-}
-
-// HACK FIXME
-use arrow_array::RecordBatch;
-use arrow_schema::Schema as ArrowSchema;
-use arrow_schema::{DataType as ArrowDataType, Field};
-use delta_kernel::engine::arrow_data::ArrowEngineData;
-#[no_mangle]
-pub unsafe extern "C" fn new_commit_info(
-    allocate_error: AllocateErrorFn,
-) -> ExternResult<*mut c_void> {
-    new_commit_info_impl()
-        .map(|commit| Box::into_raw(commit) as *mut c_void)
-        .into_extern_result(&allocate_error)
-}
-// create commit info in arrow of the form {engineInfo: "default engine C FFI"}
-fn new_commit_info_impl() -> DeltaResult<Box<ArrowEngineData>> {
-    // create commit info of the form {engineCommitInfo: Map { "engineInfo": "default engine" } }
-    let commit_info_schema = Arc::new(ArrowSchema::new(vec![Field::new(
-        "engineCommitInfo",
-        ArrowDataType::Map(
-            Arc::new(Field::new(
-                "entries",
-                ArrowDataType::Struct(
-                    vec![
-                        Field::new("key", ArrowDataType::Utf8, false),
-                        Field::new("value", ArrowDataType::Utf8, true),
-                    ]
-                    .into(),
-                ),
-                false,
-            )),
-            false,
-        ),
-        false,
-    )]));
-
-    use arrow_array::builder::StringBuilder;
-    let key_builder = StringBuilder::new();
-    let val_builder = StringBuilder::new();
-    let names = arrow_array::builder::MapFieldNames {
-        entry: "entries".to_string(),
-        key: "key".to_string(),
-        value: "value".to_string(),
-    };
-    let mut builder = arrow_array::builder::MapBuilder::new(Some(names), key_builder, val_builder);
-    builder.keys().append_value("engineInfo");
-    builder.values().append_value("default engine C FFI");
-    builder.append(true).unwrap();
-    let array = builder.finish();
-
-    let commit_info_batch =
-        RecordBatch::try_new(commit_info_schema.clone(), vec![Arc::new(array)])?;
-    Ok(Box::new(ArrowEngineData::new(commit_info_batch)))
 }
 
 // A set that can identify its contents by address

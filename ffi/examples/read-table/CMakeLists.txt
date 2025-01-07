@@ -15,6 +15,7 @@ if(PRINT_DATA)
     include(FindPkgConfig)
     pkg_check_modules(GLIB REQUIRED glib-2.0)
     pkg_check_modules(ARROW_GLIB REQUIRED arrow-glib)
+    pkg_check_modules(PARQUET_GLIB REQUIRED parquet-glib)
 endif()
 
 # Create the common static library
@@ -28,6 +29,7 @@ target_include_directories(common_lib PUBLIC
     ${COMMON_DIR}
     ${FFI_HEADERS_DIR}
     $<IF:$<BOOL:${PRINT_DATA}>,${ARROW_GLIB_INCLUDE_DIRS},>
+    $<IF:$<BOOL:${PRINT_DATA}>,${PARQUET_GLIB_INCLUDE_DIRS},>
     $<IF:$<BOOL:${PRINT_DATA}>,${CMAKE_CURRENT_SOURCE_DIR},>
 )
 
@@ -35,12 +37,14 @@ target_include_directories(common_lib PUBLIC
 target_link_directories(common_lib PUBLIC
     ${TARGET_DEBUG_DIR}
     $<IF:$<BOOL:${PRINT_DATA}>,${ARROW_GLIB_LIBRARY_DIRS},>
+    $<IF:$<BOOL:${PRINT_DATA}>,${PARQUET_GLIB_LIBRARY_DIRS},>
 )
 
 # Link libraries for common_lib
 target_link_libraries(common_lib PUBLIC
     delta_kernel_ffi
     $<IF:$<BOOL:${PRINT_DATA}>,${ARROW_GLIB_LIBRARIES},>
+    $<IF:$<BOOL:${PRINT_DATA}>,${PARQUET_GLIB_LIBRARIES},>
 )
 
 # Compile definitions for common_lib
@@ -53,6 +57,7 @@ endif()
 if(PRINT_DATA)
     target_compile_definitions(common_lib PUBLIC PRINT_ARROW_DATA)
     target_compile_options(common_lib PUBLIC ${ARROW_GLIB_CFLAGS_OTHER})
+    target_compile_options(common_lib PUBLIC ${PARQUET_GLIB_CFLAGS_OTHER})
 endif()
 
 # List of executables
@@ -81,6 +86,7 @@ foreach(EXE ${EXECUTABLES})
     if(PRINT_DATA)
         target_compile_definitions(${EXE} PUBLIC PRINT_ARROW_DATA)
         target_compile_options(${EXE} PUBLIC ${ARROW_GLIB_CFLAGS_OTHER})
+        target_compile_options(${EXE} PUBLIC ${PARQUET_GLIB_CFLAGS_OTHER})
     endif()
 
     # Compiler options

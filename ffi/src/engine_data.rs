@@ -91,16 +91,18 @@ pub unsafe extern "C" fn get_engine_data(
     data: *mut ArrowFFIData,
     engine: Handle<SharedExternEngine>,
 ) -> ExternResult<Handle<ExclusiveEngineData>> {
-    let data = unsafe { Box::from_raw(data) };
-    get_arrow_engine_data_impl(data)
+    get_engine_data_impl(data)
         .map(|engine_data| engine_data.into())
         .into_extern_result(&engine.as_ref())
 }
 
 #[cfg(feature = "default-engine")]
-unsafe fn get_engine_data_impl(data: Box<ArrowFFIData>) -> DeltaResult<Box<dyn EngineData>> {
-    let ArrowFFIData { array, schema } = *data;
-    let array: arrow_array::StructArray = arrow_array::ffi::from_ffi(array, &schema)?.into();
+unsafe fn get_engine_data_impl(data: *mut ArrowFFIData) -> DeltaResult<Box<dyn EngineData>> {
+    let array_local = std::ptr::read(&(*data).array);
+    let schema_local = std::ptr::read(&(*data).schema);
+
+    let array: arrow_array::StructArray =
+        arrow_array::ffi::from_ffi(array_local, &schema_local)?.into();
     let record_batch: arrow_array::RecordBatch = array.into();
     let engine_data = delta_kernel::engine::arrow_data::ArrowEngineData::from(record_batch);
     Ok(Box::new(engine_data))
