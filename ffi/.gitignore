@@ -1,2 +1,3 @@
 cffi-test
 cffi-test.o
+examples/read-table/.clangd
