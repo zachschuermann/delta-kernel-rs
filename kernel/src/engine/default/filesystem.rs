@@ -47,6 +47,7 @@ impl<E: TaskExecutor> FileSystemClient for ObjectStoreFileSystemClient<E> {
         &self,
         path: &Url,
     ) -> DeltaResult<Box<dyn Iterator<Item = DeltaResult<FileMeta>>>> {
+        println!("[filesystem] LIST {:?}", path);
         let url = path.clone();
         let offset = Path::from(path.path());
         // TODO properly handle table prefix
@@ -57,7 +58,13 @@ impl<E: TaskExecutor> FileSystemClient for ObjectStoreFileSystemClient<E> {
         // This channel will become the iterator
         let (sender, receiver) = std::sync::mpsc::sync_channel(4_000);
 
-        self.task_executor.spawn(async move {
+        // Note: we throw away the JoinHandle since we don't need to wait for it's return
+        //
+        // The background task associated with this JoinHandle started running immediately when you
+        // called spawn, even if you have not yet awaited the JoinHandle. If a JoinHandle is
+        // dropped, then the task continues running in the background and its return value is lost.
+        // See https://docs.rs/tokio/latest/tokio/task/struct.JoinHandle.html
+        let _ = self.task_executor.spawn(async move {
             let mut stream = store.list_with_offset(Some(&prefix), &offset);
 
             while let Some(meta) = stream.next().await {
@@ -101,13 +108,20 @@ impl<E: TaskExecutor> FileSystemClient for ObjectStoreFileSystemClient<E> {
         files: Vec<FileSlice>,
     ) -> DeltaResult<Box<dyn Iterator<Item = DeltaResult<Bytes>>>> {
         let store = self.inner.clone();
+        println!("[filesystem] READ {:?}", files);
 
         // This channel will become the output iterator.
         // Because there will already be buffering in the stream, we set the
         // buffer size to 0.
         let (sender, receiver) = std::sync::mpsc::sync_channel(0);
 
-        self.task_executor.spawn(
+        // Note: we throw away the JoinHandle since we don't need to wait for it's return
+        //
+        // The background task associated with this JoinHandle started running immediately when you
+        // called spawn, even if you have not yet awaited the JoinHandle. If a JoinHandle is
+        // dropped, then the task continues running in the background and its return value is lost.
+        // See https://docs.rs/tokio/latest/tokio/task/struct.JoinHandle.html
+        let _ = self.task_executor.spawn(
             futures::stream::iter(files)
                 .map(move |(url, range)| {
                     // Wasn't checking the scheme before calling to_file_path causing the url path to

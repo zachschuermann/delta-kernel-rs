@@ -2,9 +2,10 @@
 
 use std::io::BufReader;
 use std::ops::Range;
-use std::sync::Arc;
+use std::sync::{mpsc::Receiver, Arc};
 use std::task::{ready, Poll};
 
+use arrow_array::RecordBatch;
 use arrow_json::ReaderBuilder;
 use arrow_schema::SchemaRef as ArrowSchemaRef;
 use bytes::{Buf, Bytes};
@@ -14,7 +15,8 @@ use object_store::{DynObjectStore, GetResultPayload};
 use url::Url;
 
 use super::executor::TaskExecutor;
-use super::file_stream::{FileOpenFuture, FileOpener, FileStream};
+use super::file_stream::{FileOpenFuture, FileOpener};
+use crate::engine::arrow_data::ArrowEngineData;
 use crate::engine::arrow_utils::parse_json as arrow_parse_json;
 use crate::engine::arrow_utils::to_json_bytes;
 use crate::schema::SchemaRef;
@@ -22,6 +24,10 @@ use crate::{
     DeltaResult, EngineData, Error, ExpressionRef, FileDataReadResultIterator, FileMeta,
     JsonHandler,
 };
+use tokio::runtime::Handle;
+
+const DEFAULT_READAHEAD: usize = 10;
+const DEFAULT_BATCH_SIZE: usize = 1024;
 
 #[derive(Debug)]
 pub struct DefaultJsonHandler<E: TaskExecutor> {
@@ -40,8 +46,8 @@ impl<E: TaskExecutor> DefaultJsonHandler<E> {
         Self {
             store,
             task_executor,
-            readahead: 10,
-            batch_size: 1024,
+            readahead: DEFAULT_READAHEAD,
+            batch_size: DEFAULT_BATCH_SIZE,
         }
     }
 
@@ -62,6 +68,24 @@ impl<E: TaskExecutor> DefaultJsonHandler<E> {
     }
 }
 
+struct ChunkIter {
+    rx: Receiver<Result<RecordBatch, Error>>,
+}
+
+impl Iterator for ChunkIter {
+    type Item = Result<Box<dyn EngineData>, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.rx
+            .recv()
+            .ok()
+            .map(|r| r.map(|rb| Box::new(ArrowEngineData::new(rb)) as Box<dyn EngineData>))
+    }
+}
+
+use futures::future::join_all;
+use std::sync::mpsc;
+
 impl<E: TaskExecutor> JsonHandler for DefaultJsonHandler<E> {
     fn parse_json(
         &self,
@@ -77,19 +101,65 @@ impl<E: TaskExecutor> JsonHandler for DefaultJsonHandler<E> {
         physical_schema: SchemaRef,
         _predicate: Option<ExpressionRef>,
     ) -> DeltaResult<FileDataReadResultIterator> {
+        // handle trivial case first
         if files.is_empty() {
             return Ok(Box::new(std::iter::empty()));
         }
 
+        println!("[default json] START READ {} files", files.len());
+
         let schema: ArrowSchemaRef = Arc::new(physical_schema.as_ref().try_into()?);
-        let file_opener = JsonOpener::new(self.batch_size, schema.clone(), self.store.clone());
-        FileStream::new_async_read_iterator(
-            self.task_executor.clone(),
-            schema,
-            Box::new(file_opener),
-            files,
-            self.readahead,
-        )
+
+        // let semaphore = Arc::new(Semaphore::new(TASK_LIMIT));
+        let (tx, rx) = mpsc::channel();
+
+        // println!("files len: {:?}", files.len());
+        let runtime = self.task_executor.clone();
+
+        // let file_opener: Arc<dyn FileOpener + Send + Sync> = Arc::from(file_opener);
+        let file_opener = Arc::new(JsonOpener::new(
+            self.batch_size,
+            schema.clone(),
+            self.store.clone(),
+        ));
+        let len = files.len();
+        let files = files.to_vec();
+        self.task_executor.block_on(async move {
+            let mut handles = Vec::with_capacity(len);
+
+            for file in files.into_iter() {
+                // let permit = semaphore.clone().acquire_owned().await.unwrap();
+                let tx_clone = tx.clone();
+
+                let f = file_opener.clone();
+                // println!("file: {:?}", file);
+                let handle = runtime.spawn(async move {
+                    // read the file as stream
+                    let mut stream = f.open(file.clone(), None).unwrap().await.unwrap();
+                    // tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                    // println!("sleeping");
+                    while let Some(result) = stream.next().await {
+                        let _ = tx_clone.send(result);
+                    }
+                    // drop(permit); // release permit
+                });
+
+                handles.push(handle);
+            }
+
+            // Wait for all tasks to complete.
+            join_all(handles).await;
+        });
+
+        Ok(Box::new(ChunkIter { rx }))
+
+        //  FileStream::new_async_read_iterator(
+        //      self.task_executor.clone(),
+        //      schema,
+        //      Box::new(file_opener),
+        //      files,
+        //      self.readahead,
+        //  )
     }
 
     // note: for now we just buffer all the data and write it out all at once
@@ -119,7 +189,7 @@ impl<E: TaskExecutor> JsonHandler for DefaultJsonHandler<E> {
 }
 
 /// A [`FileOpener`] that opens a JSON file and yields a [`FileOpenFuture`]
-#[allow(missing_debug_implementations)]
+#[derive(Debug, Clone)]
 pub struct JsonOpener {
     batch_size: usize,
     projected_schema: ArrowSchemaRef,

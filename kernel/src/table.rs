@@ -78,7 +78,11 @@ impl Table {
     ///
     /// If no version is supplied, a snapshot for the latest version will be created.
     pub fn snapshot(&self, engine: &dyn Engine, version: Option<Version>) -> DeltaResult<Snapshot> {
-        Snapshot::try_new(self.location.clone(), engine, version)
+        let time = std::time::Instant::now();
+        let s = Snapshot::try_new(self.location.clone(), engine, version);
+        let elapsed = time.elapsed().as_secs_f32();
+        // println!("Snapshot creation took {elapsed} seconds");
+        s
     }
 
     /// Create a [`TableChanges`] to get a change data feed for the table between `start_version`,

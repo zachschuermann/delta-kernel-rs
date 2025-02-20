@@ -116,7 +116,13 @@ impl FileStream {
         let (sender, receiver) = std::sync::mpsc::sync_channel(readahead);
 
         let executor_for_block = task_executor.clone();
-        task_executor.spawn(async move {
+        // Note: we throw away the JoinHandle since we don't need to wait for it's return
+        //
+        // The background task associated with this JoinHandle started running immediately when you
+        // called spawn, even if you have not yet awaited the JoinHandle. If a JoinHandle is
+        // dropped, then the task continues running in the background and its return value is lost.
+        // See https://docs.rs/tokio/latest/tokio/task/struct.JoinHandle.html
+        let _ = task_executor.spawn(async move {
             while let Some(res) = stream.next().await {
                 let sender = sender.clone();
                 let join_res = executor_for_block

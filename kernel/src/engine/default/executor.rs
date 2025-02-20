@@ -16,6 +16,10 @@ use crate::DeltaResult;
 /// on another thread. This could be a multi-threaded runtime, like Tokio's or
 /// could be a single-threaded runtime on a background thread.
 pub trait TaskExecutor: Send + Sync + 'static {
+    type JoinHandle<T>: Future<Output = Result<T, Self::JoinError>> + Send
+    where
+        T: Send;
+    type JoinError: std::error::Error + Send + Sync + 'static;
     /// Block on the given future, returning its output.
     ///
     /// This should NOT panic if called within an async context. Thus it can't
@@ -26,9 +30,10 @@ pub trait TaskExecutor: Send + Sync + 'static {
         T::Output: Send + 'static;
 
     /// Run the future in the background.
-    fn spawn<F>(&self, task: F)
+    fn spawn<F, T>(&self, task: F) -> Self::JoinHandle<T>
     where
-        F: Future<Output = ()> + Send + 'static;
+        F: Future<Output = T> + Send + 'static,
+        T: Send + 'static;
 
     fn spawn_blocking<T, R>(&self, task: T) -> BoxFuture<'_, DeltaResult<R>>
     where
@@ -102,6 +107,8 @@ pub mod tokio {
     }
 
     impl TaskExecutor for TokioBackgroundExecutor {
+        type JoinHandle<T: Send> = tokio::task::JoinHandle<T>;
+        type JoinError = tokio::task::JoinError;
         fn block_on<T>(&self, task: T) -> T::Output
         where
             T: Future + Send + 'static,
@@ -128,9 +135,10 @@ pub mod tokio {
                 .expect("TokioBackgroundExecutor has crashed")
         }
 
-        fn spawn<F>(&self, task: F)
+        fn spawn<F, T>(&self, task: F) -> Self::JoinHandle<T>
         where
-            F: Future<Output = ()> + Send + 'static,
+            F: Future<Output = T> + Send + 'static,
+            T: Send + 'static,
         {
             self.send_future(Box::pin(task));
         }
@@ -191,19 +199,23 @@ pub mod tokio {
                 .expect("TokioMultiThreadExecutor has crashed")
         }
 
-        fn spawn<F>(&self, task: F)
-        where
-            F: Future<Output = ()> + Send + 'static,
-        {
-            self.handle.spawn(task);
-        }
-
         fn spawn_blocking<T, R>(&self, task: T) -> BoxFuture<'_, DeltaResult<R>>
         where
             T: FnOnce() -> R + Send + 'static,
             R: Send + 'static,
         {
             Box::pin(tokio::task::spawn_blocking(task).map_err(crate::Error::join_failure))
+        }
+
+        type JoinHandle<T: Send> = tokio::task::JoinHandle<T>;
+        type JoinError = tokio::task::JoinError;
+
+        fn spawn<F, T>(&self, task: F) -> Self::JoinHandle<T>
+        where
+            F: Future<Output = T> + Send + 'static,
+            T: Send + 'static,
+        {
+            self.handle.spawn(task)
         }
     }
 
