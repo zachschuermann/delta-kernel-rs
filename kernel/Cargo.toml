@@ -47,6 +47,10 @@ thiserror = "1"
 # only for structured logging
 tracing = { version = "0.1", features = ["log"] }
 url = "2"
+# force URL to use unicode-rs instead of ICU4X otherwise we require MSRV 1.81
+# from docs: compared to ICU4X, this makes build times faster, MSRV lower, binary size larger, and
+# run-time performance slower.
+idna_adapter = "=1.1.0"
 uuid = "1.10.0"
 z85 = "3.0.5"
 
