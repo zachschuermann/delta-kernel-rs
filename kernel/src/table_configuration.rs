@@ -20,7 +20,7 @@ use crate::table_features::{
     WriterFeatures,
 };
 use crate::table_properties::TableProperties;
-use crate::{DeltaResult, Version};
+use crate::{DeltaResult, Error, Version};
 
 /// Holds all the configuration for a table at a specific version. This includes the supported
 /// reader and writer features, table properties, schema, version, and table root. This can be used
@@ -126,10 +126,25 @@ impl TableConfiguration {
     }
     /// Returns `true` if the kernel supports writing to this table. This checks that the
     /// protocol's writer features are all supported.
-    #[allow(unused)]
     #[cfg_attr(feature = "developer-visibility", visibility::make(pub))]
-    pub(crate) fn is_write_supported(&self) -> bool {
-        self.protocol.ensure_write_supported().is_ok()
+    pub(crate) fn ensure_write_supported(&self) -> DeltaResult<()> {
+        self.protocol.ensure_write_supported()?;
+
+        // for now we don't support invariants so although we allow writer version 2 and the
+        // ColumnInvariant TableFeature we _must_ check here that they are not actually in use
+        if self
+            .protocol
+            .has_writer_feature(&WriterFeatures::Invariants)
+            || self.protocol.min_writer_version() == 2
+        {
+            if self.schema().has_invariants() {
+                return Err(Error::unsupported(
+                    "Column invariants are not yet supported",
+                ));
+            }
+        }
+
+        Ok(())
     }
     /// Returns `true` if kernel supports reading Change Data Feed on this table.
     /// See the documentation of [`TableChanges`] for more details.
