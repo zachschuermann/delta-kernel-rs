@@ -30,6 +30,8 @@ pre-release-hook = [
   "--unreleased",
   "--prepend",
   "../CHANGELOG.md",
+  "--include-path",
+  "*",
   "--tag",
   "{{version}}",
 ]
