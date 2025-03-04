@@ -4,24 +4,24 @@
 
 [Full Changelog](https://github.com/delta-io/delta-kernel-rs/compare/v0.7.0...v0.8.0)
 
+### 🏗️ Breaking changes
 
-### 🚀 Features / new APIs
-
-1. Feat!(ffi): Make get_partition_column* work on a snapshot. ([#697])
+1. ffi: `get_partition_column_count` and `get_partition_columns` now take a `Snapshot` instead of a
+   `Scan` ([#697])
+2. ffi: expression visitor callback `visit_literal_decimal` now takes `i64` for the upper half of a 128-bit int value  ([#724])
+3. - `DefaultJsonHandler::with_readahead()` renamed to `DefaultJsonHandler::with_buffer_size()` ([#711])
+4. DefaultJsonHandler's defaults changed:
+  - default buffer size: 10 => 1000 requests/files
+  - default batch size: 1024 => 1000 rows
+5. Bump MSRV to rustc 1.81 ([#725])
 
 ### 🐛 Bug Fixes
 
-1. Fix!(ffi): Visit decimals as signed values ([#724])
-2. Bump MSRV to 1.81 ([#725])
-3. Fix include-path
+1. Pin `chrono` version to fix arrow compilation failure ([#719])
 
 ### ⚡ Performance
 
 1. Replace default engine JSON reader's `FileStream` with concurrent futures ([#711])
-
-### Other
-
-1. Pin chrono version to fix arrow compilation failure ([#719])
 
 
 [#719]: https://github.com/delta-io/delta-kernel-rs/pull/719
@@ -29,7 +29,6 @@
 [#697]: https://github.com/delta-io/delta-kernel-rs/pull/697
 [#725]: https://github.com/delta-io/delta-kernel-rs/pull/725
 [#711]: https://github.com/delta-io/delta-kernel-rs/pull/711
-[#fix include-path]: https://github.com/delta-io/delta-kernel-rs/pull/fix include-path
 
 
 ## [v0.7.0](https://github.com/delta-io/delta-kernel-rs/tree/v0.7.0/) (2025-02-24)
