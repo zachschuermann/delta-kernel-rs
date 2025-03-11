@@ -132,16 +132,15 @@ impl TableConfiguration {
 
         // for now we don't support invariants so although we allow writer version 2 and the
         // ColumnInvariant TableFeature we _must_ check here that they are not actually in use
-        if self
+        if (self
             .protocol
             .has_writer_feature(&WriterFeatures::Invariants)
-            || self.protocol.min_writer_version() == 2
+            || self.protocol.min_writer_version() == 2)
+            && self.schema().has_invariants()
         {
-            if self.schema().has_invariants() {
-                return Err(Error::unsupported(
-                    "Column invariants are not yet supported",
-                ));
-            }
+            return Err(Error::unsupported(
+                "Column invariants are not yet supported",
+            ));
         }
 
         Ok(())
