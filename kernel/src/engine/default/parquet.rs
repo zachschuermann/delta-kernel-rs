@@ -198,7 +198,7 @@ impl<E: TaskExecutor> ParquetHandler for DefaultParquetHandler<E> {
                 predicate,
             )),
             _ => Box::new(ParquetOpener::new(
-                1024,
+                1_000_000,
                 physical_schema.clone(),
                 predicate,
                 self.store.clone(),
