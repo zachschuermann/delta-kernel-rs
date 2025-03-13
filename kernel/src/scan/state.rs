@@ -192,6 +192,7 @@ impl<T> RowVisitor for ScanFileVisitor<'_, T> {
         NAMES_AND_TYPES.as_ref()
     }
     fn visit<'a>(&mut self, row_count: usize, getters: &[&'a dyn GetData<'a>]) -> DeltaResult<()> {
+        println!("row_count: {row_count}");
         require!(
             getters.len() == 10,
             Error::InternalError(format!(
@@ -199,6 +200,7 @@ impl<T> RowVisitor for ScanFileVisitor<'_, T> {
                 getters.len()
             ))
         );
+        let start = std::time::Instant::now();
         for row_index in 0..row_count {
             if !self.selection_vector[row_index] {
                 // skip skipped rows
@@ -235,6 +237,8 @@ impl<T> RowVisitor for ScanFileVisitor<'_, T> {
                 )
             }
         }
+        let elapsed = start.elapsed();
+        println!("ScanFileVisitor took {:?}", elapsed.as_micros());
         Ok(())
     }
 }
