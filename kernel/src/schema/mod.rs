@@ -316,16 +316,11 @@ pub(crate) struct InvariantChecker {
 
 impl<'a> SchemaTransform<'a> for InvariantChecker {
     fn transform_struct_field(&mut self, field: &'a StructField) -> Option<Cow<'a, StructField>> {
-        if self.has_invariants {
-            return Some(Cow::Borrowed(field));
-        }
-
         if field.has_invariants() {
             self.has_invariants = true;
-            return Some(Cow::Borrowed(field));
+        } else if !self.has_invariants {
+            let _ = self.recurse_into_struct_field(field);
         }
-
-        self.recurse_into_struct_field(field);
         Some(Cow::Borrowed(field))
     }
 }

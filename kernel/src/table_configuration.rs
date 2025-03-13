@@ -137,7 +137,7 @@ impl TableConfiguration {
     pub(crate) fn ensure_write_supported(&self) -> DeltaResult<()> {
         self.protocol.ensure_write_supported()?;
 
-        // for now we don't support invariants so although we allow writer version 2 and the
+        // for now we don't allow invariants so although we support writer version 2 and the
         // ColumnInvariant TableFeature we _must_ check here that they are not actually in use
         if self.is_invariants_supported() && InvariantChecker::has_invariants(self.schema()) {
             return Err(Error::unsupported(
