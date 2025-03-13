@@ -193,6 +193,7 @@ impl<T> RowVisitor for ScanFileVisitor<'_, T> {
     }
     fn visit<'a>(&mut self, row_count: usize, getters: &[&'a dyn GetData<'a>]) -> DeltaResult<()> {
         println!("row_count: {row_count}");
+        // panic!("row_count: {row_count}");
         require!(
             getters.len() == 10,
             Error::InternalError(format!(

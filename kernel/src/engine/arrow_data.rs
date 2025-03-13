@@ -182,6 +182,8 @@ impl EngineData for ArrowEngineData {
         let mut getters = vec![];
         Self::extract_columns(&mut vec![], &mut getters, leaf_types, &mask, &self.data)?;
         if getters.len() != leaf_columns.len() {
+            // leaf_columns = 10
+            // getters = 0
             return Err(Error::MissingColumn(format!(
                 "Visitor expected {} leaf columns, but only {} were found in the data",
                 leaf_columns.len(),
@@ -201,6 +203,9 @@ impl ArrowEngineData {
         data: &'a dyn ProvidesColumnsAndFields,
     ) -> DeltaResult<()> {
         for (column, field) in data.columns().iter().zip(data.fields()) {
+            // println!("Column: {:?}", column);
+            // println!("field: {:?}", field);
+            debug!("COLUMN MASK: {:?}", column_mask);
             path.push(field.name().to_string());
             if column_mask.contains(&path[..]) {
                 if let Some(struct_array) = column.as_struct_opt() {
