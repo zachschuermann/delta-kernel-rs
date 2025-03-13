@@ -894,7 +894,11 @@ mod tests {
             3,
             7,
             Some::<Vec<String>>(vec![]),
-            Some(vec![WriterFeatures::AppendOnly, WriterFeatures::Invariants]),
+            Some(vec![
+                WriterFeatures::AppendOnly,
+                WriterFeatures::DeletionVectors,
+                WriterFeatures::Invariants,
+            ]),
         )
         .unwrap();
         assert!(protocol.ensure_write_supported().is_ok());
@@ -903,7 +907,7 @@ mod tests {
             3,
             7,
             Some([ReaderFeatures::DeletionVectors]),
-            Some([WriterFeatures::DeletionVectors]),
+            Some([WriterFeatures::RowTracking]),
         )
         .unwrap();
         assert!(protocol.ensure_write_supported().is_err());
