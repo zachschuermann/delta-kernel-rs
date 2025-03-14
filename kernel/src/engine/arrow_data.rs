@@ -203,9 +203,6 @@ impl ArrowEngineData {
         data: &'a dyn ProvidesColumnsAndFields,
     ) -> DeltaResult<()> {
         for (column, field) in data.columns().iter().zip(data.fields()) {
-            // println!("Column: {:?}", column);
-            // println!("field: {:?}", field);
-            debug!("COLUMN MASK: {:?}", column_mask);
             path.push(field.name().to_string());
             if column_mask.contains(&path[..]) {
                 if let Some(struct_array) = column.as_struct_opt() {
