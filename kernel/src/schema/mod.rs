@@ -310,6 +310,7 @@ impl StructType {
     }
 }
 
+#[derive(Debug, Default)]
 pub(crate) struct InvariantChecker {
     has_invariants: bool,
 }
@@ -331,9 +332,7 @@ impl InvariantChecker {
     /// This traverses the entire schema to check for the presence of the "delta.invariants"
     /// metadata key.
     pub(crate) fn has_invariants(schema: &Schema) -> bool {
-        let mut checker = InvariantChecker {
-            has_invariants: false,
-        };
+        let mut checker = InvariantChecker::default();
         let _ = checker.transform_struct(schema);
         checker.has_invariants
     }
