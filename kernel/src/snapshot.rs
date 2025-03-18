@@ -43,6 +43,13 @@ impl std::fmt::Debug for Snapshot {
 }
 
 impl Snapshot {
+    fn new(log_segment: LogSegment, table_configuration: TableConfiguration) -> Self {
+        Self {
+            log_segment,
+            table_configuration,
+        }
+    }
+
     /// Create a new [`Snapshot`] instance for the given version.
     ///
     /// # Parameters
@@ -79,13 +86,57 @@ impl Snapshot {
     /// - `version`: target version of the [`Snapshot`]. None will create a snapshot at the latest
     ///   version of the table.
     pub fn new_from(
-        existing_snapshot: &Snapshot,
+        existing_snapshot: Arc<Snapshot>,
         engine: &dyn Engine,
         version: Option<Version>,
-    ) -> DeltaResult<Self> {
-        // TODO(zach): for now we just pass through to the old API. We should instead optimize this
-        // to avoid replaying overlapping LogSegments.
-        Self::try_new(existing_snapshot.table_root.clone(), engine, version)
+    ) -> DeltaResult<Arc<Self>> {
+        // simple heuristic for now:
+        // 1. if the new version < existing version, just return an entirely new snapshot
+        // 2. if the new version == existing version, just return the existing snapshot
+        // 3. list from existing snapshot version
+        // 4a. if new checkpoint is found: just create a new snapshot from that checkpoint (and
+        // commits after it)
+        // 4b. if no new checkpoint is found: do lightweight P+M replay on the latest commits
+        match version {
+            Some(v) if v < existing_snapshot.version() => {
+                Self::try_new(existing_snapshot.table_root().clone(), engine, version).map(Arc::new)
+            }
+            Some(v) if v == existing_snapshot.version() => Ok(existing_snapshot.clone()),
+            new_version => {
+                debug!(
+                    "new version: {new_version:?}, existing version: {}",
+                    existing_snapshot.version()
+                );
+                let log_root = existing_snapshot.log_segment.log_root.clone();
+                let fs_client = engine.get_file_system_client();
+
+                // create a log segment just from existing_snapshot.version -> new_version
+                let log_segment = LogSegment::for_versions(
+                    fs_client.as_ref(),
+                    log_root,
+                    existing_snapshot.version(),
+                    new_version,
+                )?;
+
+                if log_segment.has_checkpoint() {
+                    Self::try_new_from_log_segment(
+                        existing_snapshot.table_root().clone(),
+                        log_segment,
+                        engine,
+                    )
+                    .map(Arc::new)
+                } else {
+                    let (new_metadata, new_protocol) = log_segment.protocol_and_metadata(engine)?;
+                    let table_configuration = TableConfiguration::new_from(
+                        existing_snapshot.table_configuration(),
+                        new_metadata,
+                        new_protocol,
+                        log_segment.end_version,
+                    )?;
+                    Ok(Arc::new(Snapshot::new(log_segment, table_configuration)))
+                }
+            }
+        }
     }
 
     /// Create a new [`Snapshot`] instance.
@@ -262,6 +313,7 @@ mod tests {
         assert_eq!(snapshot.schema(), &expected);
     }
 
+    // TODO(zach)
     #[test]
     fn test_snapshot_new_from() {
         let path =
@@ -269,8 +321,8 @@ mod tests {
         let url = url::Url::from_directory_path(path).unwrap();
 
         let engine = SyncEngine::new();
-        let old_snapshot = Snapshot::try_new(url, &engine, Some(0)).unwrap();
-        let snapshot = Snapshot::new_from(&old_snapshot, &engine, Some(0)).unwrap();
+        let old_snapshot = Arc::new(Snapshot::try_new(url, &engine, Some(0)).unwrap());
+        let snapshot = Snapshot::new_from(old_snapshot, &engine, Some(0)).unwrap();
 
         let expected =
             Protocol::try_new(3, 7, Some(["deletionVectors"]), Some(["deletionVectors"])).unwrap();

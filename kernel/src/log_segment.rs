@@ -146,6 +146,36 @@ impl LogSegment {
         )
     }
 
+    pub(crate) fn for_versions(
+        fs_client: &dyn FileSystemClient,
+        log_root: Url,
+        start_version: Version,
+        end_version: impl Into<Option<Version>>,
+    ) -> DeltaResult<Self> {
+        let end_version = end_version.into();
+        if let Some(end_version) = end_version {
+            if start_version > end_version {
+                return Err(Error::generic(
+                    "Failed to build LogSegment: start_version cannot be greater than end_version",
+                ));
+            }
+        }
+        let (mut ascending_commit_files, checkpoint_parts) =
+            list_log_files_with_version(fs_client, &log_root, Some(start_version), end_version)?;
+
+        // Commit file versions must be greater than the most recent checkpoint version if it exists
+        if let Some(checkpoint_file) = checkpoint_parts.first() {
+            ascending_commit_files.retain(|log_path| checkpoint_file.version < log_path.version);
+        }
+
+        LogSegment::try_new(
+            ascending_commit_files,
+            checkpoint_parts,
+            log_root,
+            end_version,
+        )
+    }
+
     /// Constructs a [`LogSegment`] to be used for `TableChanges`. For a TableChanges between versions
     /// `start_version` and `end_version`: Its LogSegment is made of zero checkpoints and all commits
     /// between versions `start_version` (inclusive) and `end_version` (inclusive). If no `end_version`
@@ -186,6 +216,7 @@ impl LogSegment {
         );
         LogSegment::try_new(ascending_commit_files, vec![], log_root, end_version)
     }
+
     /// Read a stream of log data from this log segment.
     ///
     /// The log files will be read from most recent to oldest.
@@ -360,8 +391,12 @@ impl LogSegment {
         )?))
     }
 
-    // Get the most up-to-date Protocol and Metadata actions
-    pub(crate) fn read_metadata(&self, engine: &dyn Engine) -> DeltaResult<(Metadata, Protocol)> {
+    // Do a lightweight protocol+metadata log replay to find the latest Protocol and Metadata in
+    // the LogSegment
+    pub(crate) fn protocol_and_metadata(
+        &self,
+        engine: &dyn Engine,
+    ) -> DeltaResult<(Option<Metadata>, Option<Protocol>)> {
         let data_batches = self.replay_for_metadata(engine)?;
         let (mut metadata_opt, mut protocol_opt) = (None, None);
         for batch in data_batches {
@@ -377,7 +412,12 @@ impl LogSegment {
                 break;
             }
         }
-        match (metadata_opt, protocol_opt) {
+        Ok((metadata_opt, protocol_opt))
+    }
+
+    // Get the most up-to-date Protocol and Metadata actions
+    pub(crate) fn read_metadata(&self, engine: &dyn Engine) -> DeltaResult<(Metadata, Protocol)> {
+        match self.protocol_and_metadata(engine)? {
             (Some(m), Some(p)) => Ok((m, p)),
             (None, Some(_)) => Err(Error::MissingMetadata),
             (Some(_), None) => Err(Error::MissingProtocol),
@@ -400,6 +440,11 @@ impl LogSegment {
         });
         // read the same protocol and metadata schema for both commits and checkpoints
         self.replay(engine, schema.clone(), schema, META_PREDICATE.clone())
+    }
+
+    /// Return whether or not the LogSegment contains a checkpoint.
+    pub(crate) fn has_checkpoint(&self) -> bool {
+        !self.checkpoint_parts.is_empty()
     }
 }
 
@@ -430,6 +475,7 @@ fn list_log_files(
             Err(_) => true,
         }))
 }
+
 /// List all commit and checkpoint files with versions above the provided `start_version` (inclusive).
 /// If successful, this returns a tuple `(ascending_commit_files, checkpoint_parts)` of type
 /// `(Vec<ParsedLogPath>, Vec<ParsedLogPath>)`. The commit files are guaranteed to be sorted in
