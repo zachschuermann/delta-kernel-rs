@@ -11,6 +11,7 @@ use std::sync::Arc;
 use tracing::debug;
 use url::Url;
 
+use delta_kernel::schema::Schema;
 use delta_kernel::snapshot::Snapshot;
 use delta_kernel::{DeltaResult, Engine, EngineData, Table};
 use delta_kernel_ffi_macros::handle_descriptor;
@@ -35,6 +36,8 @@ pub mod engine_funcs;
 pub mod error;
 use error::{AllocateError, AllocateErrorFn, ExternResult, IntoExternResult};
 pub mod expressions;
+#[cfg(feature = "tracing")]
+pub mod ffi_tracing;
 pub mod scan;
 pub mod schema;
 #[cfg(feature = "test-ffi")]
@@ -328,7 +331,7 @@ pub unsafe extern "C" fn free_row_indexes(slice: KernelRowIndexArray) {
 /// an opaque struct that encapsulates data read by an engine. this handle can be passed back into
 /// some kernel calls to operate on the data, or can be converted into the raw data as read by the
 /// [`delta_kernel::Engine`] by calling [`get_raw_engine_data`]
-#[handle_descriptor(target=dyn EngineData, mutable=true, sized=false)]
+#[handle_descriptor(target=dyn EngineData, mutable=true)]
 pub struct ExclusiveEngineData;
 
 /// Drop an `ExclusiveEngineData`.
@@ -460,7 +463,8 @@ pub unsafe extern "C" fn set_builder_option(
 }
 
 /// Consume the builder and return a `default` engine. After calling, the passed pointer is _no
-/// longer valid_.
+/// longer valid_. Note that this _consumes_ and frees the builder, so there is no need to
+/// drop/free it afterwards.
 ///
 ///
 /// # Safety
@@ -513,6 +517,18 @@ pub unsafe extern "C" fn get_sync_engine(
     get_sync_engine_impl(allocate_error).into_extern_result(&allocate_error)
 }
 
+#[cfg(any(feature = "default-engine", feature = "sync-engine"))]
+fn engine_to_handle(
+    engine: Arc<dyn Engine>,
+    allocate_error: AllocateErrorFn,
+) -> Handle<SharedExternEngine> {
+    let engine: Arc<dyn ExternEngine> = Arc::new(ExternEngineVtable {
+        engine,
+        allocate_error,
+    });
+    engine.into()
+}
+
 #[cfg(feature = "default-engine")]
 fn get_default_engine_impl(
     url: Url,
@@ -526,11 +542,7 @@ fn get_default_engine_impl(
         options,
         Arc::new(TokioBackgroundExecutor::new()),
     );
-    let engine: Arc<dyn ExternEngine> = Arc::new(ExternEngineVtable {
-        engine: Arc::new(engine?),
-        allocate_error,
-    });
-    Ok(engine.into())
+    Ok(engine_to_handle(Arc::new(engine?), allocate_error))
 }
 
 #[cfg(feature = "sync-engine")]
@@ -538,11 +550,7 @@ fn get_sync_engine_impl(
     allocate_error: AllocateErrorFn,
 ) -> DeltaResult<Handle<SharedExternEngine>> {
     let engine = delta_kernel::engine::sync::SyncEngine::new();
-    let engine: Arc<dyn ExternEngine> = Arc::new(ExternEngineVtable {
-        engine: Arc::new(engine),
-        allocate_error,
-    });
-    Ok(engine.into())
+    Ok(engine_to_handle(Arc::new(engine), allocate_error))
 }
 
 /// # Safety
@@ -553,6 +561,9 @@ pub unsafe extern "C" fn free_engine(engine: Handle<SharedExternEngine>) {
     debug!("engine released engine");
     engine.drop_handle();
 }
+
+#[handle_descriptor(target=Schema, mutable=false, sized=true)]
+pub struct SharedSchema;
 
 #[handle_descriptor(target=Snapshot, mutable=false, sized=true)]
 pub struct SharedSnapshot;
@@ -600,12 +611,32 @@ pub unsafe extern "C" fn version(snapshot: Handle<SharedSnapshot>) -> u64 {
     snapshot.version()
 }
 
+/// Get the logical schema of the specified snapshot
+///
+/// # Safety
+///
+/// Caller is responsible for passing a valid snapshot handle.
+#[no_mangle]
+pub unsafe extern "C" fn logical_schema(snapshot: Handle<SharedSnapshot>) -> Handle<SharedSchema> {
+    let snapshot = unsafe { snapshot.as_ref() };
+    Arc::new(snapshot.schema().clone()).into()
+}
+
+/// Free a schema
+///
+/// # Safety
+/// Engine is responsible for providing a valid schema handle.
+#[no_mangle]
+pub unsafe extern "C" fn free_schema(schema: Handle<SharedSchema>) {
+    schema.drop_handle();
+}
+
 /// Get the resolved root of the table. This should be used in any future calls that require
 /// constructing a path
 ///
 /// # Safety
 ///
-/// Caller is responsible for passing a valid handle.
+/// Caller is responsible for passing a valid snapshot handle.
 #[no_mangle]
 pub unsafe extern "C" fn snapshot_table_root(
     snapshot: Handle<SharedSnapshot>,
@@ -614,6 +645,29 @@ pub unsafe extern "C" fn snapshot_table_root(
     let snapshot = unsafe { snapshot.as_ref() };
     let table_root = snapshot.table_root().to_string();
     allocate_fn(kernel_string_slice!(table_root))
+}
+
+/// Get a count of the number of partition columns for this snapshot
+///
+/// # Safety
+/// Caller is responsible for passing a valid snapshot handle
+#[no_mangle]
+pub unsafe extern "C" fn get_partition_column_count(snapshot: Handle<SharedSnapshot>) -> usize {
+    let snapshot = unsafe { snapshot.as_ref() };
+    snapshot.metadata().partition_columns.len()
+}
+
+/// Get an iterator of the list of partition columns for this snapshot.
+///
+/// # Safety
+/// Caller is responsible for passing a valid snapshot handle.
+#[no_mangle]
+pub unsafe extern "C" fn get_partition_columns(
+    snapshot: Handle<SharedSnapshot>,
+) -> Handle<StringSliceIterator> {
+    let snapshot = unsafe { snapshot.as_ref() };
+    let iter: Box<StringIter> = Box::new(snapshot.metadata().partition_columns.clone().into_iter());
+    iter.into()
 }
 
 type StringIter = dyn Iterator<Item = String> + Send;
@@ -710,6 +764,10 @@ impl<T> Default for ReferenceSet<T> {
 
 #[cfg(test)]
 mod tests {
+    use delta_kernel::engine::default::{executor::tokio::TokioBackgroundExecutor, DefaultEngine};
+    use object_store::{memory::InMemory, path::Path};
+    use test_utils::{actions_to_string, actions_to_string_partitioned, add_commit, TestAction};
+
     use super::*;
     use crate::error::{EngineError, KernelError};
 
@@ -717,6 +775,20 @@ mod tests {
     extern "C" fn allocate_err(etype: KernelError, _: KernelStringSlice) -> *mut EngineError {
         let boxed = Box::new(EngineError { etype });
         Box::leak(boxed)
+    }
+
+    #[no_mangle]
+    extern "C" fn allocate_str(kernel_str: KernelStringSlice) -> NullableCvoid {
+        let s = unsafe { String::try_from_slice(&kernel_str) };
+        let ptr = Box::into_raw(Box::new(s.unwrap())).cast(); // never null
+        let ptr = unsafe { NonNull::new_unchecked(ptr) };
+        Some(ptr)
+    }
+
+    // helper to recover a string from the above
+    fn recover_string(ptr: NonNull<c_void>) -> String {
+        let ptr = ptr.as_ptr().cast();
+        *unsafe { Box::from_raw(ptr) }
     }
 
     fn ok_or_panic<T>(result: ExternResult<T>) -> T {
@@ -743,16 +815,92 @@ mod tests {
         }
     }
 
-    #[test]
-    fn engine_builder() {
-        let path = "s3://doesntmatter/foo";
+    pub(crate) fn get_default_engine() -> Handle<SharedExternEngine> {
+        let path = "memory:///doesntmatter/foo";
         let path = kernel_string_slice!(path);
         let builder = unsafe { ok_or_panic(get_engine_builder(path, allocate_err)) };
-        // TODO: When miri supports epoll_wait
-        // let engine = unsafe { builder_build(builder) };
+        unsafe { ok_or_panic(builder_build(builder)) }
+    }
 
-        // for now just rebox so it gets dropped and miri doesn't complain
-        let _box = unsafe { Box::from_raw(builder) };
+    #[test]
+    fn engine_builder() {
+        let engine = get_default_engine();
+        unsafe {
+            free_engine(engine);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_snapshot() -> Result<(), Box<dyn std::error::Error>> {
+        let storage = Arc::new(InMemory::new());
+        add_commit(
+            storage.as_ref(),
+            0,
+            actions_to_string(vec![TestAction::Metadata]),
+        )
+        .await?;
+        let engine = DefaultEngine::new(
+            storage.clone(),
+            Path::from("/"),
+            Arc::new(TokioBackgroundExecutor::new()),
+        );
+        let engine = engine_to_handle(Arc::new(engine), allocate_err);
+        let path = "memory:///";
+
+        let snapshot =
+            unsafe { ok_or_panic(snapshot(kernel_string_slice!(path), engine.shallow_copy())) };
+
+        let version = unsafe { version(snapshot.shallow_copy()) };
+        assert_eq!(version, 0);
+
+        let table_root = unsafe { snapshot_table_root(snapshot.shallow_copy(), allocate_str) };
+        assert!(table_root.is_some());
+        let s = recover_string(table_root.unwrap());
+        assert_eq!(&s, path);
+
+        unsafe { free_snapshot(snapshot) }
+        unsafe { free_engine(engine) }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_partition_cols() -> Result<(), Box<dyn std::error::Error>> {
+        let storage = Arc::new(InMemory::new());
+        add_commit(
+            storage.as_ref(),
+            0,
+            actions_to_string_partitioned(vec![TestAction::Metadata]),
+        )
+        .await?;
+        let engine = DefaultEngine::new(
+            storage.clone(),
+            Path::from("/"),
+            Arc::new(TokioBackgroundExecutor::new()),
+        );
+        let engine = engine_to_handle(Arc::new(engine), allocate_err);
+        let path = "memory:///";
+
+        let snapshot =
+            unsafe { ok_or_panic(snapshot(kernel_string_slice!(path), engine.shallow_copy())) };
+
+        let partition_count = unsafe { get_partition_column_count(snapshot.shallow_copy()) };
+        assert_eq!(partition_count, 1, "Should have one partition");
+
+        let partition_iter = unsafe { get_partition_columns(snapshot.shallow_copy()) };
+
+        #[no_mangle]
+        extern "C" fn visit_partition(_context: NullableCvoid, slice: KernelStringSlice) {
+            let s = unsafe { String::try_from_slice(&slice) }.unwrap();
+            assert_eq!(s.as_str(), "val", "Partition col should be 'val'");
+        }
+        while unsafe { string_slice_next(partition_iter.shallow_copy(), None, visit_partition) } {
+            // validate happens inside visit_partition
+        }
+
+        unsafe { free_string_slice_data(partition_iter) }
+        unsafe { free_snapshot(snapshot) }
+        unsafe { free_engine(engine) }
+        Ok(())
     }
 
     #[test]

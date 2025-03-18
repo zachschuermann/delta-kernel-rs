@@ -1,6 +1,7 @@
 #include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/time.h>
 
 #include "arrow.h"
 #include "read_table.h"
@@ -27,7 +28,7 @@ void print_partition_info(struct EngineContext* context, const CStringMap* parti
   for (uintptr_t i = 0; i < context->partition_cols->len; i++) {
     char* col = context->partition_cols->cols[i];
     KernelStringSlice key = { col, strlen(col) };
-    char* partition_val = get_from_map(partition_values, key, allocate_string);
+    char* partition_val = get_from_string_map(partition_values, key, allocate_string);
     if (partition_val) {
       print_diag("  partition '%s' here: %s\n", col, partition_val);
       free(partition_val);
@@ -42,13 +43,14 @@ void print_partition_info(struct EngineContext* context, const CStringMap* parti
 }
 
 // Kernel will call this function for each file that should be scanned. The arguments include enough
-// context to constuct the correct logical data from the physically read parquet
+// context to construct the correct logical data from the physically read parquet
 void scan_row_callback(
   void* engine_context,
   KernelStringSlice path,
   int64_t size,
   const Stats* stats,
   const DvInfo* dv_info,
+  const Expression* transform,
   const CStringMap* partition_values)
 {
   (void)size; // not using this at the moment
@@ -75,7 +77,7 @@ void scan_row_callback(
   context->partition_values = partition_values;
   print_partition_info(context, partition_values);
 #ifdef PRINT_ARROW_DATA
-  c_read_parquet_file(context, path, selection_vector);
+  c_read_parquet_file(context, path, selection_vector, transform);
 #endif
   free_bool_slice(selection_vector);
   context->partition_values = NULL;
@@ -86,14 +88,15 @@ void scan_row_callback(
 void do_visit_scan_data(
   void* engine_context,
   ExclusiveEngineData* engine_data,
-  KernelBoolSlice selection_vec)
+  KernelBoolSlice selection_vec,
+  const CTransforms* transforms)
 {
   print_diag("\nScan iterator found some data to read\n  Of this data, here is "
              "a selection vector\n");
   print_selection_vector("    ", &selection_vec);
   // Ask kernel to iterate each individual file and call us back with extracted metadata
   print_diag("Asking kernel to call us back for each scan row (file to read)\n");
-  visit_scan_data(engine_data, selection_vec, engine_context, scan_row_callback);
+  visit_scan_data(engine_data, selection_vec, transforms, engine_context, scan_row_callback);
   free_bool_slice(selection_vec);
   free_engine_data(engine_data);
 }
@@ -110,15 +113,15 @@ void visit_partition(void* context, const KernelStringSlice partition)
 }
 
 // Build a list of partition column names.
-PartitionList* get_partition_list(SharedGlobalScanState* state)
+PartitionList* get_partition_list(SharedSnapshot* snapshot)
 {
   print_diag("Building list of partition columns\n");
-  uintptr_t count = get_partition_column_count(state);
+  uintptr_t count = get_partition_column_count(snapshot);
   PartitionList* list = malloc(sizeof(PartitionList));
   // We set the `len` to 0 here and use it to track how many items we've added to the list
   list->len = 0;
   list->cols = malloc(sizeof(char*) * count);
-  StringSliceIterator* part_iter = get_partition_columns(state);
+  StringSliceIterator* part_iter = get_partition_columns(snapshot);
   for (;;) {
     bool has_next = string_slice_next(part_iter, list, visit_partition);
     if (!has_next) {
@@ -150,12 +153,67 @@ void free_partition_list(PartitionList* list) {
   free(list);
 }
 
+static const char *LEVEL_STRING[] = {
+  "ERROR", "WARN", "INFO", "DEBUG", "TRACE"
+};
+
+// define some ansi color escapes so we can have nice colored output in our logs
+#define RED   "\x1b[31m"
+#define BLUE  "\x1b[34m"
+#define DIM   "\x1b[2m"
+#define RESET "\x1b[0m"
+
+void tracing_callback(struct Event event) {
+  struct timeval tv;
+  char buffer[32];
+  gettimeofday(&tv, NULL);
+  struct tm *tm_info = gmtime(&tv.tv_sec);
+  strftime(buffer, 26, "%Y-%m-%dT%H:%M:%S", tm_info);
+  char* level_color = event.level < 3 ? RED : BLUE;
+  printf(
+    "%s%s.%06dZ%s [%sKernel %s%s] %s%.*s%s: %.*s\n",
+    DIM,
+    buffer,
+    (int)tv.tv_usec, // safe, microseconds are in int range
+    RESET,
+    level_color,
+    LEVEL_STRING[event.level],
+    RESET,
+    DIM,
+    (int)event.target.len,
+    event.target.ptr,
+    RESET,
+    (int)event.message.len,
+    event.message.ptr);
+  if (event.file.ptr) {
+    printf(
+      "  %sat%s %.*s:%i\n",
+      DIM,
+      RESET,
+      (int)event.file.len,
+      event.file.ptr,
+      event.line);
+  }
+}
+
+void log_line_callback(KernelStringSlice line) {
+  printf("%.*s", (int)line.len, line.ptr);
+}
+
 int main(int argc, char* argv[])
 {
   if (argc < 2) {
     printf("Usage: %s table/path\n", argv[0]);
     return -1;
   }
+
+#ifdef VERBOSE
+  enable_event_tracing(tracing_callback, TRACE);
+  // we could also do something like this if we want less control over formatting
+  // enable_formatted_log_line_tracing(log_line_callback, TRACE, FULL, true, true, false, false);
+#else
+  enable_event_tracing(tracing_callback, INFO);
+#endif
 
   char* table_path = argv[1];
   printf("Reading table at %s\n", table_path);
@@ -206,6 +264,8 @@ int main(int argc, char* argv[])
   char* table_root = snapshot_table_root(snapshot, allocate_string);
   print_diag("Table root: %s\n", table_root);
 
+  PartitionList* partition_cols = get_partition_list(snapshot);
+
   print_diag("Starting table scan\n\n");
 
   ExternResultHandleSharedScan scan_res = scan(snapshot, engine, NULL);
@@ -216,10 +276,11 @@ int main(int argc, char* argv[])
 
   SharedScan* scan = scan_res.ok;
   SharedGlobalScanState* global_state = get_global_scan_state(scan);
+  SharedSchema* logical_schema = get_global_logical_schema(global_state);
   SharedSchema* read_schema = get_global_read_schema(global_state);
-  PartitionList* partition_cols = get_partition_list(global_state);
   struct EngineContext context = {
     global_state,
+    logical_schema,
     read_schema,
     table_root,
     engine,
@@ -264,7 +325,8 @@ int main(int argc, char* argv[])
 
   free_kernel_scan_data(data_iter);
   free_scan(scan);
-  free_global_read_schema(read_schema);
+  free_schema(logical_schema);
+  free_schema(read_schema);
   free_global_scan_state(global_state);
   free_snapshot(snapshot);
   free_engine(engine);

@@ -9,10 +9,12 @@ use indexmap::IndexMap;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
-use crate::expressions::ColumnName;
-use crate::table_features::ColumnMappingMode;
+// re-export because many call sites that use schemas do not necessarily use expressions
+pub(crate) use crate::expressions::{column_name, ColumnName};
 use crate::utils::require;
 use crate::{DeltaResult, Error};
+
+pub(crate) mod compare;
 
 pub type Schema = StructType;
 pub type SchemaRef = Arc<StructType>;
@@ -50,6 +52,12 @@ impl From<String> for MetadataValue {
 impl From<&String> for MetadataValue {
     fn from(value: &String) -> Self {
         Self::String(value.clone())
+    }
+}
+
+impl From<&str> for MetadataValue {
+    fn from(value: &str) -> Self {
+        Self::String(value.to_string())
     }
 }
 
@@ -116,6 +124,16 @@ impl StructField {
         }
     }
 
+    /// Creates a new nullable field
+    pub fn nullable(name: impl Into<String>, data_type: impl Into<DataType>) -> Self {
+        Self::new(name, data_type, true)
+    }
+
+    /// Creates a new non-nullable field
+    pub fn not_null(name: impl Into<String>, data_type: impl Into<DataType>) -> Self {
+        Self::new(name, data_type, false)
+    }
+
     pub fn with_metadata(
         mut self,
         metadata: impl IntoIterator<Item = (impl Into<String>, impl Into<MetadataValue>)>,
@@ -131,20 +149,18 @@ impl StructField {
         self.metadata.get(key.as_ref())
     }
 
-    /// Get the physical name for this field as it should be read from parquet, based on the
-    /// specified column mapping mode.
-    pub fn physical_name(&self, mapping_mode: ColumnMappingMode) -> DeltaResult<&str> {
-        let physical_name_key = ColumnMetadataKey::ColumnMappingPhysicalName.as_ref();
-        let name_mapped_name = self.metadata.get(physical_name_key);
-        match (mapping_mode, name_mapped_name) {
-            (ColumnMappingMode::None, _) => Ok(self.name.as_str()),
-            (ColumnMappingMode::Name, Some(MetadataValue::String(name))) => Ok(name),
-            (ColumnMappingMode::Name, invalid) => Err(Error::generic(format!(
-                "Missing or invalid {physical_name_key}: {invalid:?}"
-            ))),
-            (ColumnMappingMode::Id, _) => {
-                Err(Error::generic("Don't support id column mapping yet"))
-            }
+    /// Get the physical name for this field as it should be read from parquet.
+    ///
+    /// NOTE: Caller affirms that the schema was already validated by
+    /// [`crate::table_features::validate_schema_column_mapping`], to ensure that annotations are
+    /// always and only present when column mapping mode is enabled.
+    pub fn physical_name(&self) -> &str {
+        match self
+            .metadata
+            .get(ColumnMetadataKey::ColumnMappingPhysicalName.as_ref())
+        {
+            Some(MetadataValue::String(physical_name)) => physical_name,
+            _ => &self.name,
         }
     }
 
@@ -188,32 +204,32 @@ impl StructField {
             .collect()
     }
 
-    pub fn make_physical(&self, mapping_mode: ColumnMappingMode) -> DeltaResult<Self> {
-        use ColumnMappingMode::*;
-        match mapping_mode {
-            Id => return Err(Error::generic("Column ID mapping mode not supported")),
-            None => return Ok(self.clone()),
-            Name => {} // fall out
-        }
-
-        struct ApplyNameMapping;
-        impl<'a> SchemaTransform<'a> for ApplyNameMapping {
+    /// Applies physical name mappings to this field
+    ///
+    /// NOTE: Caller affirms that the schema was already validated by
+    /// [`crate::table_features::validate_schema_column_mapping`], to ensure that annotations are
+    /// always and only present when column mapping mode is enabled.
+    pub fn make_physical(&self) -> Self {
+        struct MakePhysical;
+        impl<'a> SchemaTransform<'a> for MakePhysical {
             fn transform_struct_field(
                 &mut self,
                 field: &'a StructField,
             ) -> Option<Cow<'a, StructField>> {
                 let field = self.recurse_into_struct_field(field)?;
-                match field.get_config_value(&ColumnMetadataKey::ColumnMappingPhysicalName) {
-                    Some(MetadataValue::String(physical_name)) => {
-                        Some(Cow::Owned(field.with_name(physical_name)))
-                    }
-                    _ => Some(field),
-                }
+                Some(Cow::Owned(field.with_name(field.physical_name())))
             }
         }
+        // NOTE: unwrap is safe because the transformer is incapable of returning None
+        MakePhysical
+            .transform_struct_field(self)
+            .unwrap()
+            .into_owned()
+    }
 
-        let field = ApplyNameMapping.transform_struct_field(self);
-        Ok(field.unwrap().into_owned())
+    fn has_invariants(&self) -> bool {
+        self.metadata
+            .contains_key(ColumnMetadataKey::Invariants.as_ref())
     }
 }
 
@@ -224,7 +240,7 @@ pub struct StructType {
     pub type_name: String,
     /// The type of element stored in this array
     // We use indexmap to preserve the order of fields as they are defined in the schema
-    // while also allowing for fast lookup by name. The atlerative to do a liner search
+    // while also allowing for fast lookup by name. The alternative is to do a linear search
     // for each field by name would be potentially quite expensive for large schemas.
     pub fields: IndexMap<String, StructField>,
 }
@@ -275,6 +291,11 @@ impl StructType {
         self.fields.values()
     }
 
+    // Checks if the `StructType` contains a field with the specified name.
+    pub(crate) fn contains(&self, name: impl AsRef<str>) -> bool {
+        self.fields.contains_key(name.as_ref())
+    }
+
     /// Extracts the name and type of all leaf columns, in schema order. Caller should pass Some
     /// `own_name` if this schema is embedded in a larger struct (e.g. `add.*`) and None if the
     /// schema is a top-level result (e.g. `*`).
@@ -286,6 +307,34 @@ impl StructType {
         let mut get_leaves = GetSchemaLeaves::new(own_name.into());
         let _ = get_leaves.transform_struct(self);
         (get_leaves.names, get_leaves.types).into()
+    }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct InvariantChecker {
+    has_invariants: bool,
+}
+
+impl<'a> SchemaTransform<'a> for InvariantChecker {
+    fn transform_struct_field(&mut self, field: &'a StructField) -> Option<Cow<'a, StructField>> {
+        if field.has_invariants() {
+            self.has_invariants = true;
+        } else if !self.has_invariants {
+            let _ = self.recurse_into_struct_field(field);
+        }
+        Some(Cow::Borrowed(field))
+    }
+}
+
+impl InvariantChecker {
+    /// Checks if any column in the schema (including nested columns) has invariants defined.
+    ///
+    /// This traverses the entire schema to check for the presence of the "delta.invariants"
+    /// metadata key.
+    pub(crate) fn has_invariants(schema: &Schema) -> bool {
+        let mut checker = InvariantChecker::default();
+        let _ = checker.transform_struct(schema);
+        checker.has_invariants
     }
 }
 
@@ -422,7 +471,7 @@ impl MapType {
     /// Create a schema assuming the map is stored as a struct with the specified key and value field names
     pub fn as_struct_schema(&self, key_name: String, val_name: String) -> Schema {
         StructType::new([
-            StructField::new(key_name, self.key_type.clone(), false),
+            StructField::not_null(key_name, self.key_type.clone()),
             StructField::new(val_name, self.value_type.clone(), self.value_contains_null),
         ])
     }
@@ -1034,10 +1083,10 @@ mod tests {
             .unwrap();
         assert!(matches!(col_id, MetadataValue::Number(num) if *num == 4));
         assert_eq!(
-            field.physical_name(ColumnMappingMode::Name).unwrap(),
+            field.physical_name(),
             "col-5f422f40-de70-45b2-88ab-1d5c90e94db1"
         );
-        let physical_field = field.make_physical(ColumnMappingMode::Name).unwrap();
+        let physical_field = field.make_physical();
         assert_eq!(
             physical_field.name,
             "col-5f422f40-de70-45b2-88ab-1d5c90e94db1"
@@ -1091,73 +1140,65 @@ mod tests {
     #[test]
     fn test_depth_checker() {
         let schema = DataType::struct_type([
-            StructField::new(
+            StructField::nullable(
                 "a",
                 ArrayType::new(
                     DataType::struct_type([
-                        StructField::new("w", DataType::LONG, true),
-                        StructField::new("x", ArrayType::new(DataType::LONG, true), true),
-                        StructField::new(
+                        StructField::nullable("w", DataType::LONG),
+                        StructField::nullable("x", ArrayType::new(DataType::LONG, true)),
+                        StructField::nullable(
                             "y",
                             MapType::new(DataType::LONG, DataType::STRING, true),
-                            true,
                         ),
-                        StructField::new(
+                        StructField::nullable(
                             "z",
                             DataType::struct_type([
-                                StructField::new("n", DataType::LONG, true),
-                                StructField::new("m", DataType::STRING, true),
+                                StructField::nullable("n", DataType::LONG),
+                                StructField::nullable("m", DataType::STRING),
                             ]),
-                            true,
                         ),
                     ]),
                     true,
                 ),
-                true,
             ),
-            StructField::new(
+            StructField::nullable(
                 "b",
                 DataType::struct_type([
-                    StructField::new("o", ArrayType::new(DataType::LONG, true), true),
-                    StructField::new(
+                    StructField::nullable("o", ArrayType::new(DataType::LONG, true)),
+                    StructField::nullable(
                         "p",
                         MapType::new(DataType::LONG, DataType::STRING, true),
-                        true,
                     ),
-                    StructField::new(
+                    StructField::nullable(
                         "q",
                         DataType::struct_type([
-                            StructField::new(
+                            StructField::nullable(
                                 "s",
                                 DataType::struct_type([
-                                    StructField::new("u", DataType::LONG, true),
-                                    StructField::new("v", DataType::LONG, true),
+                                    StructField::nullable("u", DataType::LONG),
+                                    StructField::nullable("v", DataType::LONG),
                                 ]),
-                                true,
                             ),
-                            StructField::new("t", DataType::LONG, true),
+                            StructField::nullable("t", DataType::LONG),
                         ]),
-                        true,
                     ),
-                    StructField::new("r", DataType::LONG, true),
+                    StructField::nullable("r", DataType::LONG),
                 ]),
-                true,
             ),
-            StructField::new(
+            StructField::nullable(
                 "c",
                 MapType::new(
                     DataType::LONG,
                     DataType::struct_type([
-                        StructField::new("f", DataType::LONG, true),
-                        StructField::new("g", DataType::STRING, true),
+                        StructField::nullable("f", DataType::LONG),
+                        StructField::nullable("g", DataType::STRING),
                     ]),
                     true,
                 ),
-                true,
             ),
         ]);
 
-        // Similer to SchemaDepthChecker::check, but also returns call count
+        // Similar to SchemaDepthChecker::check, but also returns call count
         let check_with_call_count =
             |depth_limit| SchemaDepthChecker::check_with_call_count(&schema, depth_limit);
 
@@ -1199,5 +1240,92 @@ mod tests {
             MetadataValue::Other(array_json).to_string(),
             "[\"an\",\"array\"]"
         );
+    }
+
+    #[test]
+    fn test_has_invariants() {
+        // Schema with no invariants
+        let schema = StructType::new([
+            StructField::nullable("a", DataType::STRING),
+            StructField::nullable("b", DataType::INTEGER),
+        ]);
+        assert!(!InvariantChecker::has_invariants(&schema));
+
+        // Schema with top-level invariant
+        let mut field = StructField::nullable("c", DataType::STRING);
+        field.metadata.insert(
+            ColumnMetadataKey::Invariants.as_ref().to_string(),
+            MetadataValue::String("c > 0".to_string()),
+        );
+
+        let schema = StructType::new([StructField::nullable("a", DataType::STRING), field]);
+        assert!(InvariantChecker::has_invariants(&schema));
+
+        // Schema with nested invariant in a struct
+        let nested_field = StructField::nullable(
+            "nested_c",
+            DataType::struct_type([{
+                let mut field = StructField::nullable("d", DataType::INTEGER);
+                field.metadata.insert(
+                    ColumnMetadataKey::Invariants.as_ref().to_string(),
+                    MetadataValue::String("d > 0".to_string()),
+                );
+                field
+            }]),
+        );
+
+        let schema = StructType::new([
+            StructField::nullable("a", DataType::STRING),
+            StructField::nullable("b", DataType::INTEGER),
+            nested_field,
+        ]);
+        assert!(InvariantChecker::has_invariants(&schema));
+
+        // Schema with nested invariant in an array of structs
+        let array_field = StructField::nullable(
+            "array_field",
+            ArrayType::new(
+                DataType::struct_type([{
+                    let mut field = StructField::nullable("d", DataType::INTEGER);
+                    field.metadata.insert(
+                        ColumnMetadataKey::Invariants.as_ref().to_string(),
+                        MetadataValue::String("d > 0".to_string()),
+                    );
+                    field
+                }]),
+                true,
+            ),
+        );
+
+        let schema = StructType::new([
+            StructField::nullable("a", DataType::STRING),
+            StructField::nullable("b", DataType::INTEGER),
+            array_field,
+        ]);
+        assert!(InvariantChecker::has_invariants(&schema));
+
+        // Schema with nested invariant in a map value that's a struct
+        let map_field = StructField::nullable(
+            "map_field",
+            MapType::new(
+                DataType::STRING,
+                DataType::struct_type([{
+                    let mut field = StructField::nullable("d", DataType::INTEGER);
+                    field.metadata.insert(
+                        ColumnMetadataKey::Invariants.as_ref().to_string(),
+                        MetadataValue::String("d > 0".to_string()),
+                    );
+                    field
+                }]),
+                true,
+            ),
+        );
+
+        let schema = StructType::new([
+            StructField::nullable("a", DataType::STRING),
+            StructField::nullable("b", DataType::INTEGER),
+            map_field,
+        ]);
+        assert!(InvariantChecker::has_invariants(&schema));
     }
 }
