@@ -37,7 +37,7 @@ mod tests;
 /// and in `TableChanges` when built with [`LogSegment::for_table_changes`].
 ///
 /// [`Snapshot`]: crate::snapshot::Snapshot
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "developer-visibility", visibility::make(pub))]
 pub(crate) struct LogSegment {
     pub end_version: Version,
@@ -55,6 +55,43 @@ impl LogSegment {
         log_root: Url,
         end_version: Option<Version>,
     ) -> DeltaResult<Self> {
+        let effective_version =
+            LogSegment::validate_segment(&ascending_commit_files, &checkpoint_parts, end_version)?;
+        Ok(LogSegment {
+            end_version: effective_version,
+            log_root,
+            ascending_commit_files,
+            checkpoint_parts,
+        })
+    }
+
+    /// append a LogSegment to this LogSegment. The new (appended) LogSegment must start at the (end
+    /// version + 1) of the existing LogSegment. And the new LogSegment must have the same log root.
+    pub(crate) fn append(&mut self, log_segment: &LogSegment) -> DeltaResult<()> {
+        require!(
+            self.log_root == log_segment.log_root,
+            Error::generic("Cannot append LogSegment with different log roots")
+        );
+        // we just append the commit files and checkpoint files, then validate
+        self.ascending_commit_files
+            .extend(log_segment.ascending_commit_files.iter().cloned());
+        self.checkpoint_parts
+            .extend(log_segment.checkpoint_parts.iter().cloned());
+        self.end_version = LogSegment::validate_segment(
+            &self.ascending_commit_files,
+            &self.checkpoint_parts,
+            log_segment.end_version.into(),
+        )?;
+        Ok(())
+    }
+
+    /// validate all commit files, all checkpoint parts, and expected end version. returns the
+    /// effective end version of the log segment.
+    fn validate_segment(
+        ascending_commit_files: &Vec<ParsedLogPath>,
+        checkpoint_parts: &Vec<ParsedLogPath>,
+        end_version: Option<Version>,
+    ) -> DeltaResult<Version> {
         // We require that commits that are contiguous. In other words, there must be no gap between commit versions.
         require!(
             ascending_commit_files
@@ -81,26 +118,22 @@ impl LogSegment {
         }
 
         // Get the effective version from chosen files
-        let version_eff = ascending_commit_files
+        let effective_version = ascending_commit_files
             .last()
             .or(checkpoint_parts.first())
             .ok_or(Error::generic("No files in log segment"))?
             .version;
         if let Some(end_version) = end_version {
             require!(
-                version_eff == end_version,
+                effective_version == end_version,
                 Error::generic(format!(
                     "LogSegment end version {} not the same as the specified end version {}",
-                    version_eff, end_version
+                    effective_version, end_version
                 ))
             );
         }
-        Ok(LogSegment {
-            end_version: version_eff,
-            log_root,
-            ascending_commit_files,
-            checkpoint_parts,
-        })
+
+        Ok(effective_version)
     }
 
     /// Constructs a [`LogSegment`] to be used for [`Snapshot`]. For a `Snapshot` at version `n`:

@@ -21,6 +21,7 @@ const LAST_CHECKPOINT_FILE_NAME: &str = "_last_checkpoint";
 /// throughout time, `Snapshot`s represent a view of a table at a specific point in time; they
 /// have a defined schema (which may change over time for any given table), specific version, and
 /// frozen log segment.
+#[derive(PartialEq, Eq)]
 pub struct Snapshot {
     log_segment: LogSegment,
     table_configuration: TableConfiguration,
@@ -93,7 +94,7 @@ impl Snapshot {
         // simple heuristic for now:
         // 1. if the new version < existing version, just return an entirely new snapshot
         // 2. if the new version == existing version, just return the existing snapshot
-        // 3. list from existing snapshot version
+        // 3. list from (existing snapshot version + 1) onward
         // 4a. if new checkpoint is found: just create a new snapshot from that checkpoint (and
         // commits after it)
         // 4b. if no new checkpoint is found: do lightweight P+M replay on the latest commits
@@ -111,29 +112,36 @@ impl Snapshot {
                 let fs_client = engine.get_file_system_client();
 
                 // create a log segment just from existing_snapshot.version -> new_version
-                let log_segment = LogSegment::for_versions(
+                let new_log_segment = LogSegment::for_versions(
                     fs_client.as_ref(),
                     log_root,
-                    existing_snapshot.version(),
+                    existing_snapshot.version() + 1,
                     new_version,
                 )?;
 
-                if log_segment.has_checkpoint() {
+                if new_log_segment.has_checkpoint() {
                     Self::try_new_from_log_segment(
                         existing_snapshot.table_root().clone(),
-                        log_segment,
+                        new_log_segment,
                         engine,
                     )
                     .map(Arc::new)
                 } else {
-                    let (new_metadata, new_protocol) = log_segment.protocol_and_metadata(engine)?;
+                    let (new_metadata, new_protocol) =
+                        new_log_segment.protocol_and_metadata(engine)?;
                     let table_configuration = TableConfiguration::new_from(
                         existing_snapshot.table_configuration(),
                         new_metadata,
                         new_protocol,
-                        log_segment.end_version,
+                        new_log_segment.end_version,
                     )?;
-                    Ok(Arc::new(Snapshot::new(log_segment, table_configuration)))
+                    // we must add the new log segment to the existing snapshot's log segment
+                    let mut combined_log_segment = existing_snapshot.log_segment.clone();
+                    combined_log_segment.append(&new_log_segment)?;
+                    Ok(Arc::new(Snapshot::new(
+                        combined_log_segment,
+                        table_configuration,
+                    )))
                 }
             }
         }
@@ -313,7 +321,16 @@ mod tests {
         assert_eq!(snapshot.schema(), &expected);
     }
 
-    // TODO(zach)
+    // interesting cases for testing Snapshot::new_from:
+    // 1. new version < existing version
+    // 2. new version == existing version
+    // 3. new version > existing version AND
+    //   a. log segment for old..=new version has a checkpoint (with new protocol/metadata)
+    //   b. log segment for old..=new version has no checkpoint
+    //     i. commits have (new protocol, new metadata)
+    //     ii. commits have (new protocol, no metadata)
+    //     iii. commits have (no protocol, new metadata)
+    //     iv. commits have (no protocol, no metadata)
     #[test]
     fn test_snapshot_new_from() {
         let path =
@@ -321,16 +338,31 @@ mod tests {
         let url = url::Url::from_directory_path(path).unwrap();
 
         let engine = SyncEngine::new();
-        let old_snapshot = Arc::new(Snapshot::try_new(url, &engine, Some(0)).unwrap());
-        let snapshot = Snapshot::new_from(old_snapshot, &engine, Some(0)).unwrap();
+        let old_snapshot = Arc::new(Snapshot::try_new(url.clone(), &engine, Some(1)).unwrap());
+        // 1. new version < existing version
+        let snapshot = Snapshot::new_from(old_snapshot.clone(), &engine, Some(0)).unwrap();
+        let expected = Snapshot::try_new(url.clone(), &engine, Some(0)).unwrap();
+        assert_eq!(snapshot, expected.into());
 
-        let expected =
-            Protocol::try_new(3, 7, Some(["deletionVectors"]), Some(["deletionVectors"])).unwrap();
-        assert_eq!(snapshot.protocol(), &expected);
+        // 2. new version == existing version
+        let snapshot = Snapshot::new_from(old_snapshot.clone(), &engine, Some(1)).unwrap();
+        let expected = old_snapshot.clone();
+        assert_eq!(snapshot, expected);
 
-        let schema_string = r#"{"type":"struct","fields":[{"name":"value","type":"integer","nullable":true,"metadata":{}}]}"#;
-        let expected: StructType = serde_json::from_str(schema_string).unwrap();
-        assert_eq!(snapshot.schema(), &expected);
+        // for (3) we will just engineer custom log files
+        let store = Arc::new(InMemory::new());
+
+        // 3. new version > existing version
+        // a. log segment for old..=new version has a checkpoint (with new protocol/metadata)
+
+        // b. log segment for old..=new version has no checkpoint
+        // i. commits have (new protocol, new metadata)
+
+        // ii. commits have (new protocol, no metadata)
+
+        // iii. commits have (no protocol, new metadata)
+
+        // iv. commits have (no protocol, no metadata)
     }
 
     #[test]
