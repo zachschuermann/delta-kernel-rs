@@ -9,7 +9,7 @@ use url::Url;
 use crate::actions::{Metadata, Protocol};
 use crate::log_segment::LogSegment;
 use crate::scan::ScanBuilder;
-use crate::schema::Schema;
+use crate::schema::{Schema, SchemaRef};
 use crate::table_configuration::TableConfiguration;
 use crate::table_features::ColumnMappingMode;
 use crate::table_properties::TableProperties;
@@ -178,8 +178,7 @@ impl Snapshot {
     }
 
     /// Table [`Schema`] at this `Snapshot`s version.
-    // TODO should this return SchemaRef?
-    pub fn schema(&self) -> &Schema {
+    pub fn schema(&self) -> SchemaRef {
         self.table_configuration.schema()
     }
 
@@ -302,8 +301,8 @@ mod tests {
         assert_eq!(snapshot.protocol(), &expected);
 
         let schema_string = r#"{"type":"struct","fields":[{"name":"value","type":"integer","nullable":true,"metadata":{}}]}"#;
-        let expected: StructType = serde_json::from_str(schema_string).unwrap();
-        assert_eq!(snapshot.schema(), &expected);
+        let expected: SchemaRef = serde_json::from_str(schema_string).unwrap();
+        assert_eq!(snapshot.schema(), expected);
     }
 
     #[test]
@@ -320,8 +319,8 @@ mod tests {
         assert_eq!(snapshot.protocol(), &expected);
 
         let schema_string = r#"{"type":"struct","fields":[{"name":"value","type":"integer","nullable":true,"metadata":{}}]}"#;
-        let expected: StructType = serde_json::from_str(schema_string).unwrap();
-        assert_eq!(snapshot.schema(), &expected);
+        let expected: SchemaRef = serde_json::from_str(schema_string).unwrap();
+        assert_eq!(snapshot.schema(), expected);
     }
 
     // interesting cases for testing Snapshot::new_from:
@@ -363,11 +362,7 @@ mod tests {
         // in each test we will modify versions 1 and 2 to test different scenarios
         fn test_new_from(store: Arc<InMemory>) -> DeltaResult<()> {
             let url = Url::parse("memory:///")?;
-            let engine = DefaultEngine::new(
-                store,
-                Path::from("/"),
-                Arc::new(TokioBackgroundExecutor::new()),
-            );
+            let engine = DefaultEngine::new(store, Arc::new(TokioBackgroundExecutor::new()));
             let base_snapshot = Arc::new(Snapshot::try_new(url.clone(), &engine, Some(0))?);
             let snapshot = Snapshot::new_from(base_snapshot.clone(), &engine, Some(1))?;
             let expected = Snapshot::try_new(url.clone(), &engine, Some(1))?;
@@ -501,11 +496,9 @@ mod tests {
         let url = url::Url::from_directory_path(path).unwrap();
 
         let store = Arc::new(LocalFileSystem::new());
-        let prefix = Path::from(url.path());
         let client = ObjectStoreFileSystemClient::new(
             store,
             false, // don't have ordered listing
-            prefix,
             Arc::new(TokioBackgroundExecutor::new()),
         );
         let cp = read_last_checkpoint(&client, &url).unwrap();
@@ -543,7 +536,6 @@ mod tests {
         let client = ObjectStoreFileSystemClient::new(
             store,
             false, // don't have ordered listing
-            Path::from("/"),
             Arc::new(TokioBackgroundExecutor::new()),
         );
         let url = Url::parse("memory:///valid/").expect("valid url");
