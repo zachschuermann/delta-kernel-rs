@@ -117,7 +117,7 @@ impl TableConfiguration {
             ),
         };
 
-        // if there's new protocol: have to ensure read suported
+        // if there's new protocol: have to ensure read supported
         let protocol = match new_protocol {
             Some(protocol) => {
                 protocol.ensure_read_supported()?;

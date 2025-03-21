@@ -89,7 +89,7 @@ impl Snapshot {
     pub fn try_new_from(
         existing_snapshot: Arc<Snapshot>,
         engine: &dyn Engine,
-        version: Option<Version>,
+        version: impl Into<Option<Version>>,
     ) -> DeltaResult<Arc<Self>> {
         // simple heuristic for now:
         // 1. if the new version == existing version, just return the existing snapshot
@@ -98,9 +98,9 @@ impl Snapshot {
         // 4a. if new checkpoint is found: just create a new snapshot from that checkpoint (and
         // commits after it)
         // 4b. if no new checkpoint is found: do lightweight P+M replay on the latest commits
-
         let old_version = existing_snapshot.version();
-        if let Some(new_version) = version {
+        let new_version = version.into();
+        if let Some(new_version) = new_version {
             if new_version == old_version {
                 // Re-requesting the same version
                 return Ok(existing_snapshot.clone());
@@ -127,7 +127,7 @@ impl Snapshot {
             fs_client.as_ref(),
             log_root,
             existing_snapshot.version() + 1,
-            version,
+            new_version,
         );
 
         match new_log_segment {
