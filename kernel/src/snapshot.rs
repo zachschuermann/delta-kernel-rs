@@ -86,64 +86,85 @@ impl Snapshot {
     /// - `engine`: Implementation of [`Engine`] apis.
     /// - `version`: target version of the [`Snapshot`]. None will create a snapshot at the latest
     ///   version of the table.
-    pub fn new_from(
+    pub fn try_new_from(
         existing_snapshot: Arc<Snapshot>,
         engine: &dyn Engine,
         version: Option<Version>,
     ) -> DeltaResult<Arc<Self>> {
         // simple heuristic for now:
-        // 1. if the new version < existing version, just return an entirely new snapshot
-        // 2. if the new version == existing version, just return the existing snapshot
+        // 1. if the new version == existing version, just return the existing snapshot
+        // 2. if the new version < existing version, just return an entirely new snapshot
         // 3. list from (existing snapshot version + 1) onward
         // 4a. if new checkpoint is found: just create a new snapshot from that checkpoint (and
         // commits after it)
         // 4b. if no new checkpoint is found: do lightweight P+M replay on the latest commits
-        match version {
-            Some(v) if v < existing_snapshot.version() => {
-                Self::try_new(existing_snapshot.table_root().clone(), engine, version).map(Arc::new)
+
+        let old_version = existing_snapshot.version();
+        if let Some(new_version) = version {
+            if new_version == old_version {
+                // Re-requesting the same version
+                return Ok(existing_snapshot.clone());
             }
-            Some(v) if v == existing_snapshot.version() => Ok(existing_snapshot.clone()),
-            new_version => {
-                debug!(
-                    "new version: {new_version:?}, existing version: {}",
-                    existing_snapshot.version()
+            if new_version < old_version {
+                warn!(
+                    "[Snapshot::try_new_from] new version: {new_version} is older than existing version: {}",
+                    old_version
                 );
-                let log_root = existing_snapshot.log_segment.log_root.clone();
-                let fs_client = engine.get_file_system_client();
-
-                // create a log segment just from existing_snapshot.version -> new_version
-                let new_log_segment = LogSegment::for_versions(
-                    fs_client.as_ref(),
-                    log_root,
-                    existing_snapshot.version() + 1,
-                    new_version,
-                )?;
-
-                if new_log_segment.has_checkpoint() {
-                    Self::try_new_from_log_segment(
-                        existing_snapshot.table_root().clone(),
-                        new_log_segment,
-                        engine,
-                    )
-                    .map(Arc::new)
-                } else {
-                    let (new_metadata, new_protocol) =
-                        new_log_segment.protocol_and_metadata(engine)?;
-                    let table_configuration = TableConfiguration::new_from(
-                        existing_snapshot.table_configuration(),
-                        new_metadata,
-                        new_protocol,
-                        new_log_segment.end_version,
-                    )?;
-                    // we must add the new log segment to the existing snapshot's log segment
-                    let mut combined_log_segment = existing_snapshot.log_segment.clone();
-                    combined_log_segment.append(&new_log_segment)?;
-                    Ok(Arc::new(Snapshot::new(
-                        combined_log_segment,
-                        table_configuration,
-                    )))
-                }
+                // Hint is too new, just create a new snapshot the normal way
+                return Snapshot::try_new(
+                    existing_snapshot.table_root().clone(),
+                    engine,
+                    Some(new_version),
+                )
+                .map(Arc::new);
             }
+        }
+
+        // create a log segment just from existing_snapshot.version -> new_version
+        let log_root = existing_snapshot.log_segment.log_root.clone();
+        let fs_client = engine.get_file_system_client();
+        let new_log_segment = LogSegment::for_versions(
+            fs_client.as_ref(),
+            log_root,
+            existing_snapshot.version() + 1,
+            version,
+        );
+
+        match new_log_segment {
+            Err(Error::EmptyLogSegment) => {
+                // no new log files at all, just return the existing snapshot
+                Ok(existing_snapshot.clone())
+            }
+            Ok(new_log_segment) if new_log_segment.ascending_commit_files.is_empty() => {
+                // no new commits, just return the existing snapshot
+                Ok(existing_snapshot.clone())
+            }
+            Ok(new_log_segment) if new_log_segment.has_checkpoint() => {
+                // we have a checkpoint in the new LogSegment, just construct a new snapshot from that
+                Self::try_new_from_log_segment(
+                    existing_snapshot.table_root().clone(),
+                    new_log_segment,
+                    engine,
+                )
+                .map(Arc::new)
+            }
+            Ok(new_log_segment) => {
+                // we have new commits and no new snapshot: we replay new commits for P+M and then
+                // create a new snapshot by combining LogSegments and building a new TableConfiguration
+                let (new_metadata, new_protocol) = new_log_segment.protocol_and_metadata(engine)?;
+                let table_configuration = TableConfiguration::new_from(
+                    existing_snapshot.table_configuration(),
+                    new_metadata,
+                    new_protocol,
+                    new_log_segment.end_version,
+                )?;
+                // NB: we must add the new log segment to the existing snapshot's log segment
+                Ok(Arc::new(Snapshot::new(
+                    LogSegment::try_concat(existing_snapshot.log_segment.clone(), new_log_segment)?,
+                    table_configuration,
+                )))
+            }
+            Err(e) => Err(e),
         }
     }
 
@@ -284,7 +305,6 @@ mod tests {
     use crate::engine::default::DefaultEngine;
     use crate::engine::sync::SyncEngine;
     use crate::path::ParsedLogPath;
-    use crate::schema::StructType;
     use test_utils::{add_commit, delta_path_for_version};
 
     #[test]
@@ -327,7 +347,8 @@ mod tests {
     // 1. new version < existing version
     // 2. new version == existing version
     // 3. new version > existing version AND
-    //   a. log segment for old..=new version has a checkpoint (with new protocol/metadata)
+    //   a. log segment hasn't changed
+    //   b. log segment for old..=new version has a checkpoint (with new protocol/metadata)
     //   b. log segment for old..=new version has no checkpoint
     //     i. commits have (new protocol, new metadata)
     //     ii. commits have (new protocol, no metadata)
@@ -342,12 +363,12 @@ mod tests {
         let engine = SyncEngine::new();
         let old_snapshot = Arc::new(Snapshot::try_new(url.clone(), &engine, Some(1)).unwrap());
         // 1. new version < existing version
-        let snapshot = Snapshot::new_from(old_snapshot.clone(), &engine, Some(0)).unwrap();
+        let snapshot = Snapshot::try_new_from(old_snapshot.clone(), &engine, Some(0)).unwrap();
         let expected = Snapshot::try_new(url.clone(), &engine, Some(0)).unwrap();
         assert_eq!(snapshot, expected.into());
 
         // 2. new version == existing version
-        let snapshot = Snapshot::new_from(old_snapshot.clone(), &engine, Some(1)).unwrap();
+        let snapshot = Snapshot::try_new_from(old_snapshot.clone(), &engine, Some(1)).unwrap();
         let expected = old_snapshot.clone();
         assert_eq!(snapshot, expected);
 
@@ -364,7 +385,7 @@ mod tests {
             let url = Url::parse("memory:///")?;
             let engine = DefaultEngine::new(store, Arc::new(TokioBackgroundExecutor::new()));
             let base_snapshot = Arc::new(Snapshot::try_new(url.clone(), &engine, Some(0))?);
-            let snapshot = Snapshot::new_from(base_snapshot.clone(), &engine, Some(1))?;
+            let snapshot = Snapshot::try_new_from(base_snapshot.clone(), &engine, Some(1))?;
             let expected = Snapshot::try_new(url.clone(), &engine, Some(1))?;
             assert_eq!(snapshot, expected.into());
             Ok(())
@@ -413,21 +434,30 @@ mod tests {
             }),
         ];
         commit(store.as_ref(), 0, commit0.clone()).await;
+        // 3. new version > existing version
+        // a. no new log segment
+        let url = Url::parse("memory:///")?;
+        let engine = DefaultEngine::new(
+            Arc::new(store.fork()),
+            Arc::new(TokioBackgroundExecutor::new()),
+        );
+        let base_snapshot = Arc::new(Snapshot::try_new(url.clone(), &engine, Some(0))?);
+        let snapshot = Snapshot::try_new_from(base_snapshot.clone(), &engine, Some(1))?;
+        let expected = Snapshot::try_new(url.clone(), &engine, Some(0))?;
+        assert_eq!(snapshot, expected.into());
 
-        // // 3. new version > existing version
-        // // a. log segment for old..=new version has a checkpoint (with new protocol/metadata)
-        // let store_3a = store.fork();
-        // let mut checkpoint1 = commit0.clone();
-        // checkpoint1[1] = json!({
-        //     "protocol": {
-        //         "minReaderVersion": 2,
-        //         "minWriterVersion": 5
-        //     }
-        // });
-        // checkpoint1[2]["partitionColumns"] = serde_json::to_value(["some_partition_column"])?;
-
-        // // TODO read a checkpoint as a record_batch
-
+        //// TODO checkpoint test
+        //// b. log segment for old..=new version has a checkpoint (with new protocol/metadata)
+        //let store_3a = store.fork();
+        //let mut checkpoint1 = commit0.clone();
+        //checkpoint1[1] = json!({
+        //    "protocol": {
+        //        "minReaderVersion": 2,
+        //        "minWriterVersion": 5
+        //    }
+        //});
+        //checkpoint1[2]["partitionColumns"] = serde_json::to_value(["some_partition_column"])?;
+        //
         // // Write the record batch to a Parquet file
         // let mut buffer = vec![];
         // let mut writer = ArrowWriter::try_new(&mut buffer, record_batch.schema(), None)?;
@@ -443,9 +473,9 @@ mod tests {
         //     .unwrap();
         // test_new_from(store_3a.into())?;
 
-        // b. log segment for old..=new version has no checkpoint
+        // c. log segment for old..=new version has no checkpoint
         // i. commits have (new protocol, new metadata)
-        let store_3b_i = store.fork();
+        let store_3c_i = store.fork();
         let mut commit1 = commit0.clone();
         commit1[1] = json!({
             "protocol": {
@@ -454,11 +484,11 @@ mod tests {
             }
         });
         commit1[2]["partitionColumns"] = serde_json::to_value(["some_partition_column"])?;
-        commit(&store_3b_i, 1, commit1).await;
-        test_new_from(store_3b_i.into())?;
+        commit(&store_3c_i, 1, commit1).await;
+        test_new_from(store_3c_i.into())?;
 
         // ii. commits have (new protocol, no metadata)
-        let store_3b_ii = store.fork();
+        let store_3c_ii = store.fork();
         let mut commit1 = commit0.clone();
         commit1[1] = json!({
             "protocol": {
@@ -467,22 +497,22 @@ mod tests {
             }
         });
         commit1.remove(2); // remove metadata
-        commit(&store_3b_ii, 1, commit1).await;
-        test_new_from(store_3b_ii.into())?;
+        commit(&store_3c_ii, 1, commit1).await;
+        test_new_from(store_3c_ii.into())?;
 
         // iii. commits have (no protocol, new metadata)
-        let store_3b_iii = store.fork();
+        let store_3c_iii = store.fork();
         let mut commit1 = commit0.clone();
         commit1[2]["partitionColumns"] = serde_json::to_value(["some_partition_column"])?;
         commit1.remove(1); // remove protocol
-        commit(&store_3b_iii, 1, commit1).await;
-        test_new_from(store_3b_iii.into())?;
+        commit(&store_3c_iii, 1, commit1).await;
+        test_new_from(store_3c_iii.into())?;
 
         // iv. commits have (no protocol, no metadata)
-        let store_3b_iv = store.fork();
+        let store_3c_iv = store.fork();
         let commit1 = vec![commit0[0].clone()];
-        commit(&store_3b_iv, 1, commit1).await;
-        test_new_from(store_3b_iv.into())?;
+        commit(&store_3c_iv, 1, commit1).await;
+        test_new_from(store_3c_iv.into())?;
 
         Ok(())
     }

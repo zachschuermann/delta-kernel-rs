@@ -55,43 +55,6 @@ impl LogSegment {
         log_root: Url,
         end_version: Option<Version>,
     ) -> DeltaResult<Self> {
-        let effective_version =
-            LogSegment::validate_segment(&ascending_commit_files, &checkpoint_parts, end_version)?;
-        Ok(LogSegment {
-            end_version: effective_version,
-            log_root,
-            ascending_commit_files,
-            checkpoint_parts,
-        })
-    }
-
-    /// append a LogSegment to this LogSegment. The new (appended) LogSegment must start at the (end
-    /// version + 1) of the existing LogSegment. And the new LogSegment must have the same log root.
-    pub(crate) fn append(&mut self, log_segment: &LogSegment) -> DeltaResult<()> {
-        require!(
-            self.log_root == log_segment.log_root,
-            Error::generic("Cannot append LogSegment with different log roots")
-        );
-        // we just append the commit files and checkpoint files, then validate
-        self.ascending_commit_files
-            .extend(log_segment.ascending_commit_files.iter().cloned());
-        self.checkpoint_parts
-            .extend(log_segment.checkpoint_parts.iter().cloned());
-        self.end_version = LogSegment::validate_segment(
-            &self.ascending_commit_files,
-            &self.checkpoint_parts,
-            log_segment.end_version.into(),
-        )?;
-        Ok(())
-    }
-
-    /// validate all commit files, all checkpoint parts, and expected end version. returns the
-    /// effective end version of the log segment.
-    fn validate_segment(
-        ascending_commit_files: &Vec<ParsedLogPath>,
-        checkpoint_parts: &Vec<ParsedLogPath>,
-        end_version: Option<Version>,
-    ) -> DeltaResult<Version> {
         // We require that commits that are contiguous. In other words, there must be no gap between commit versions.
         require!(
             ascending_commit_files
@@ -121,7 +84,7 @@ impl LogSegment {
         let effective_version = ascending_commit_files
             .last()
             .or(checkpoint_parts.first())
-            .ok_or(Error::generic("No files in log segment"))?
+            .ok_or(Error::EmptyLogSegment)?
             .version;
         if let Some(end_version) = end_version {
             require!(
@@ -133,7 +96,32 @@ impl LogSegment {
             );
         }
 
-        Ok(effective_version)
+        Ok(LogSegment {
+            end_version: effective_version,
+            log_root,
+            ascending_commit_files,
+            checkpoint_parts,
+        })
+    }
+
+    /// concatenate two LogSegments (in order). The new LogSegment must start at the
+    /// (end version + 1) of the existing LogSegment. And the new LogSegment must have the same log
+    /// root.
+    pub(crate) fn try_concat(mut front: LogSegment, back: LogSegment) -> DeltaResult<LogSegment> {
+        require!(
+            front.log_root == back.log_root,
+            Error::generic("Cannot concatenate LogSegments with different log roots")
+        );
+        front
+            .ascending_commit_files
+            .extend(back.ascending_commit_files);
+        front.checkpoint_parts.extend(back.checkpoint_parts);
+        LogSegment::try_new(
+            front.ascending_commit_files,
+            front.checkpoint_parts,
+            front.log_root,
+            Some(back.end_version),
+        )
     }
 
     /// Constructs a [`LogSegment`] to be used for [`Snapshot`]. For a `Snapshot` at version `n`:
