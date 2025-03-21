@@ -278,12 +278,15 @@ mod tests {
     use object_store::memory::InMemory;
     use object_store::path::Path;
     use object_store::ObjectStore;
+    use serde_json::json;
 
     use crate::engine::default::executor::tokio::TokioBackgroundExecutor;
     use crate::engine::default::filesystem::ObjectStoreFileSystemClient;
+    use crate::engine::default::DefaultEngine;
     use crate::engine::sync::SyncEngine;
     use crate::path::ParsedLogPath;
     use crate::schema::StructType;
+    use test_utils::{add_commit, delta_path_for_version};
 
     #[test]
     fn test_snapshot_read_metadata() {
@@ -331,8 +334,8 @@ mod tests {
     //     ii. commits have (new protocol, no metadata)
     //     iii. commits have (no protocol, new metadata)
     //     iv. commits have (no protocol, no metadata)
-    #[test]
-    fn test_snapshot_new_from() {
+    #[tokio::test]
+    async fn test_snapshot_new_from() -> DeltaResult<()> {
         let path =
             std::fs::canonicalize(PathBuf::from("./tests/data/table-with-dv-small/")).unwrap();
         let url = url::Url::from_directory_path(path).unwrap();
@@ -349,20 +352,144 @@ mod tests {
         let expected = old_snapshot.clone();
         assert_eq!(snapshot, expected);
 
+        // tests Snapshot::new_from by:
+        // 1. creating a snapshot with new API for commits 0..=2 (based on old snapshot at 0)
+        // 2. comparing with a snapshot created directly at version 2
+        //
+        // the commits tested are:
+        // - commit 0 -> base snapshot at this version
+        // - commit 1 -> final snapshots at this version
+        //
+        // in each test we will modify versions 1 and 2 to test different scenarios
+        fn test_new_from(store: Arc<InMemory>) -> DeltaResult<()> {
+            let url = Url::parse("memory:///")?;
+            let engine = DefaultEngine::new(
+                store,
+                Path::from("/"),
+                Arc::new(TokioBackgroundExecutor::new()),
+            );
+            let base_snapshot = Arc::new(Snapshot::try_new(url.clone(), &engine, Some(0))?);
+            let snapshot = Snapshot::new_from(base_snapshot.clone(), &engine, Some(1))?;
+            let expected = Snapshot::try_new(url.clone(), &engine, Some(1))?;
+            assert_eq!(snapshot, expected.into());
+            Ok(())
+        }
+
+        // TODO: unify this and lots of stuff in LogSegment tests and test_utils
+        async fn commit(store: &InMemory, version: Version, commit: Vec<serde_json::Value>) {
+            let commit_data = commit
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<String>>()
+                .join("\n");
+            add_commit(store, version, commit_data).await.unwrap();
+        }
+
         // for (3) we will just engineer custom log files
         let store = Arc::new(InMemory::new());
+        // everything will have a starting 0 commit with commitInfo, protocol, metadata
+        let commit0 = vec![
+            json!({
+                "commitInfo": {
+                    "timestamp": 1587968586154i64,
+                    "operation": "WRITE",
+                    "operationParameters": {"mode":"ErrorIfExists","partitionBy":"[]"},
+                    "isBlindAppend":true
+                }
+            }),
+            json!({
+                "protocol": {
+                    "minReaderVersion": 1,
+                    "minWriterVersion": 2
+                }
+            }),
+            json!({
+                "metaData": {
+                    "id":"5fba94ed-9794-4965-ba6e-6ee3c0d22af9",
+                    "format": {
+                        "provider": "parquet",
+                        "options": {}
+                    },
+                    "schemaString": "{\"type\":\"struct\",\"fields\":[{\"name\":\"id\",\"type\":\"integer\",\"nullable\":true,\"metadata\":{}},{\"name\":\"val\",\"type\":\"string\",\"nullable\":true,\"metadata\":{}}]}",
+                    "partitionColumns": [],
+                    "configuration": {},
+                    "createdTime": 1587968585495i64
+                }
+            }),
+        ];
+        commit(store.as_ref(), 0, commit0.clone()).await;
 
-        // 3. new version > existing version
-        // a. log segment for old..=new version has a checkpoint (with new protocol/metadata)
+        // // 3. new version > existing version
+        // // a. log segment for old..=new version has a checkpoint (with new protocol/metadata)
+        // let store_3a = store.fork();
+        // let mut checkpoint1 = commit0.clone();
+        // checkpoint1[1] = json!({
+        //     "protocol": {
+        //         "minReaderVersion": 2,
+        //         "minWriterVersion": 5
+        //     }
+        // });
+        // checkpoint1[2]["partitionColumns"] = serde_json::to_value(["some_partition_column"])?;
+
+        // // TODO read a checkpoint as a record_batch
+
+        // // Write the record batch to a Parquet file
+        // let mut buffer = vec![];
+        // let mut writer = ArrowWriter::try_new(&mut buffer, record_batch.schema(), None)?;
+        // writer.write(&record_batch)?;
+        // writer.close()?;
+
+        // store
+        //     .put(
+        //         &delta_path_for_version(1, "checkpoint.parquet"),
+        //         buffer.into(),
+        //     )
+        //     .await
+        //     .unwrap();
+        // test_new_from(store_3a.into())?;
 
         // b. log segment for old..=new version has no checkpoint
         // i. commits have (new protocol, new metadata)
+        let store_3b_i = store.fork();
+        let mut commit1 = commit0.clone();
+        commit1[1] = json!({
+            "protocol": {
+                "minReaderVersion": 2,
+                "minWriterVersion": 5
+            }
+        });
+        commit1[2]["partitionColumns"] = serde_json::to_value(["some_partition_column"])?;
+        commit(&store_3b_i, 1, commit1).await;
+        test_new_from(store_3b_i.into())?;
 
         // ii. commits have (new protocol, no metadata)
+        let store_3b_ii = store.fork();
+        let mut commit1 = commit0.clone();
+        commit1[1] = json!({
+            "protocol": {
+                "minReaderVersion": 2,
+                "minWriterVersion": 5
+            }
+        });
+        commit1.remove(2); // remove metadata
+        commit(&store_3b_ii, 1, commit1).await;
+        test_new_from(store_3b_ii.into())?;
 
         // iii. commits have (no protocol, new metadata)
+        let store_3b_iii = store.fork();
+        let mut commit1 = commit0.clone();
+        commit1[2]["partitionColumns"] = serde_json::to_value(["some_partition_column"])?;
+        commit1.remove(1); // remove protocol
+        commit(&store_3b_iii, 1, commit1).await;
+        test_new_from(store_3b_iii.into())?;
 
         // iv. commits have (no protocol, no metadata)
+        let store_3b_iv = store.fork();
+        let commit1 = vec![commit0[0].clone()];
+        commit(&store_3b_iv, 1, commit1).await;
+        test_new_from(store_3b_iv.into())?;
+
+        Ok(())
     }
 
     #[test]
