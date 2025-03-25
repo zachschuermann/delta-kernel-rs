@@ -89,7 +89,7 @@ impl LogSegment {
         let effective_version = ascending_commit_files
             .last()
             .or(checkpoint_parts.first())
-            .ok_or(Error::generic("FIXME"))?
+            .ok_or(Error::generic("No files in log segment"))?
             .version;
         if let Some(end_version) = end_version {
             require!(
