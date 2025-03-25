@@ -84,9 +84,9 @@ impl Snapshot {
     /// 1. if the new version == existing version, just return the existing snapshot
     /// 2. if the new version < existing version, error: there is no optimization to do here
     /// 3. list from (existing snapshot version + 1) onward
-    /// 4a. if new checkpoint is found: just create a new snapshot from that checkpoint (and
-    /// commits after it)
-    /// 4b. if no new checkpoint is found: do lightweight P+M replay on the latest commits
+    /// 4. a. if new checkpoint is found: just create a new snapshot from that checkpoint (and
+    ///       commits after it)
+    ///    b. if no new checkpoint is found: do lightweight P+M replay on the latest commits
     ///
     /// # Parameters
     ///
