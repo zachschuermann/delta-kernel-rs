@@ -49,12 +49,17 @@ pub(crate) struct LogSegment {
 }
 
 impl LogSegment {
-    fn try_new(
-        ascending_commit_files: Vec<ParsedLogPath>,
+    pub(crate) fn try_new(
+        mut ascending_commit_files: Vec<ParsedLogPath>,
         checkpoint_parts: Vec<ParsedLogPath>,
         log_root: Url,
         end_version: Option<Version>,
     ) -> DeltaResult<Self> {
+        // Commit file versions must be greater than the most recent checkpoint version if it exists
+        if let Some(checkpoint_file) = checkpoint_parts.first() {
+            ascending_commit_files.retain(|log_path| checkpoint_file.version < log_path.version);
+        }
+
         // We require that commits that are contiguous. In other words, there must be no gap between commit versions.
         require!(
             ascending_commit_files
@@ -84,7 +89,7 @@ impl LogSegment {
         let effective_version = ascending_commit_files
             .last()
             .or(checkpoint_parts.first())
-            .ok_or(Error::EmptyLogSegment)?
+            .ok_or(Error::generic("FIXME"))?
             .version;
         if let Some(end_version) = end_version {
             require!(
@@ -102,26 +107,6 @@ impl LogSegment {
             ascending_commit_files,
             checkpoint_parts,
         })
-    }
-
-    /// concatenate two LogSegments (in order). The new LogSegment must start at the
-    /// (end version + 1) of the existing LogSegment. And the new LogSegment must have the same log
-    /// root.
-    pub(crate) fn try_concat(mut front: LogSegment, back: LogSegment) -> DeltaResult<LogSegment> {
-        require!(
-            front.log_root == back.log_root,
-            Error::generic("Cannot concatenate LogSegments with different log roots")
-        );
-        front
-            .ascending_commit_files
-            .extend(back.ascending_commit_files);
-        front.checkpoint_parts.extend(back.checkpoint_parts);
-        LogSegment::try_new(
-            front.ascending_commit_files,
-            front.checkpoint_parts,
-            front.log_root,
-            Some(back.end_version),
-        )
     }
 
     /// Constructs a [`LogSegment`] to be used for [`Snapshot`]. For a `Snapshot` at version `n`:
@@ -143,7 +128,7 @@ impl LogSegment {
     ) -> DeltaResult<Self> {
         let time_travel_version = time_travel_version.into();
 
-        let (mut ascending_commit_files, checkpoint_parts) =
+        let (ascending_commit_files, checkpoint_parts) =
             match (checkpoint_hint.into(), time_travel_version) {
                 (Some(cp), None) => {
                     list_log_files_with_checkpoint(&cp, fs_client, &log_root, None)?
@@ -154,46 +139,11 @@ impl LogSegment {
                 _ => list_log_files_with_version(fs_client, &log_root, None, time_travel_version)?,
             };
 
-        // Commit file versions must be greater than the most recent checkpoint version if it exists
-        if let Some(checkpoint_file) = checkpoint_parts.first() {
-            ascending_commit_files.retain(|log_path| checkpoint_file.version < log_path.version);
-        }
-
         LogSegment::try_new(
             ascending_commit_files,
             checkpoint_parts,
             log_root,
             time_travel_version,
-        )
-    }
-
-    pub(crate) fn for_versions(
-        fs_client: &dyn FileSystemClient,
-        log_root: Url,
-        start_version: Version,
-        end_version: impl Into<Option<Version>>,
-    ) -> DeltaResult<Self> {
-        let end_version = end_version.into();
-        if let Some(end_version) = end_version {
-            if start_version > end_version {
-                return Err(Error::generic(
-                    "Failed to build LogSegment: start_version cannot be greater than end_version",
-                ));
-            }
-        }
-        let (mut ascending_commit_files, checkpoint_parts) =
-            list_log_files_with_version(fs_client, &log_root, Some(start_version), end_version)?;
-
-        // Commit file versions must be greater than the most recent checkpoint version if it exists
-        if let Some(checkpoint_file) = checkpoint_parts.first() {
-            ascending_commit_files.retain(|log_path| checkpoint_file.version < log_path.version);
-        }
-
-        LogSegment::try_new(
-            ascending_commit_files,
-            checkpoint_parts,
-            log_root,
-            end_version,
         )
     }
 
@@ -502,7 +452,7 @@ fn list_log_files(
 /// `(Vec<ParsedLogPath>, Vec<ParsedLogPath>)`. The commit files are guaranteed to be sorted in
 /// ascending order by version. The elements of `checkpoint_parts` are all the parts of the same
 /// checkpoint. Checkpoint parts share the same version.
-fn list_log_files_with_version(
+pub(crate) fn list_log_files_with_version(
     fs_client: &dyn FileSystemClient,
     log_root: &Url,
     start_version: Option<Version>,

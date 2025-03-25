@@ -198,10 +198,6 @@ pub enum Error {
     /// Invalid checkpoint files
     #[error("Invalid Checkpoint: {0}")]
     InvalidCheckpoint(String),
-
-    /// Empty log segment
-    #[error("Empty log segment")]
-    EmptyLogSegment,
 }
 
 // Convenience constructors for Error types that take a String argument

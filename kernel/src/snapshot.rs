@@ -7,7 +7,7 @@ use tracing::{debug, warn};
 use url::Url;
 
 use crate::actions::{Metadata, Protocol};
-use crate::log_segment::LogSegment;
+use crate::log_segment::{self, LogSegment};
 use crate::scan::ScanBuilder;
 use crate::schema::{Schema, SchemaRef};
 use crate::table_configuration::TableConfiguration;
@@ -80,6 +80,14 @@ impl Snapshot {
     /// already have a [`Snapshot`] lying around and want to do the minimal work to 'update' the
     /// snapshot to a later version.
     ///
+    /// We implement a simple heuristic:
+    /// 1. if the new version == existing version, just return the existing snapshot
+    /// 2. if the new version < existing version, error: there is no optimization to do here
+    /// 3. list from (existing snapshot version + 1) onward
+    /// 4a. if new checkpoint is found: just create a new snapshot from that checkpoint (and
+    /// commits after it)
+    /// 4b. if no new checkpoint is found: do lightweight P+M replay on the latest commits
+    ///
     /// # Parameters
     ///
     /// - `existing_snapshot`: reference to an existing [`Snapshot`]
@@ -91,13 +99,6 @@ impl Snapshot {
         engine: &dyn Engine,
         version: impl Into<Option<Version>>,
     ) -> DeltaResult<Arc<Self>> {
-        // simple heuristic for now:
-        // 1. if the new version == existing version, just return the existing snapshot
-        // 2. if the new version < existing version, just return an entirely new snapshot
-        // 3. list from (existing snapshot version + 1) onward
-        // 4a. if new checkpoint is found: just create a new snapshot from that checkpoint (and
-        // commits after it)
-        // 4b. if no new checkpoint is found: do lightweight P+M replay on the latest commits
         let old_version = existing_snapshot.version();
         let new_version = version.into();
         if let Some(new_version) = new_version {
@@ -106,66 +107,82 @@ impl Snapshot {
                 return Ok(existing_snapshot.clone());
             }
             if new_version < old_version {
-                warn!(
-                    "[Snapshot::try_new_from] new version: {new_version} is older than existing version: {}",
-                    old_version
-                );
-                // Hint is too new, just create a new snapshot the normal way
-                return Snapshot::try_new(
-                    existing_snapshot.table_root().clone(),
-                    engine,
-                    Some(new_version),
-                )
-                .map(Arc::new);
+                // Hint is too new: error since this is effectively an incorrect optimization
+                return Err(Error::Generic(format!(
+                    "Requested snapshot version {} is older than snapshot hint version {}",
+                    new_version, old_version
+                )));
+            }
+        }
+
+        let log_root = existing_snapshot.log_segment.log_root.clone();
+        let fs_client = engine.get_file_system_client();
+        let start_version = old_version + 1;
+        // Check for new commits
+        let (new_ascending_commit_files, checkpoint_parts) =
+            log_segment::list_log_files_with_version(
+                fs_client.as_ref(),
+                &log_root,
+                Some(start_version),
+                new_version,
+            )?;
+
+        // NB: we need to check both checkpoints and commits since we filter commits at and below
+        // the checkpoint version. Example: if we have a checkpoint + commit at version 1, the log
+        // listing above will only return the checkpoint and not the commit.
+        if new_ascending_commit_files.is_empty() && checkpoint_parts.is_empty() {
+            match new_version {
+                Some(new_version) if new_version != old_version => {
+                    // No new commits, but we are looking for a new version
+                    return Err(Error::Generic(format!(
+                        "Requested snapshot version {} is newer than the latest version {}",
+                        new_version, old_version
+                    )));
+                }
+                _ => {
+                    // No new commits, just return the same snapshot
+                    return Ok(existing_snapshot.clone());
+                }
             }
         }
 
         // create a log segment just from existing_snapshot.version -> new_version
-        let log_root = existing_snapshot.log_segment.log_root.clone();
-        let fs_client = engine.get_file_system_client();
-        let new_log_segment = LogSegment::for_versions(
-            fs_client.as_ref(),
-            log_root,
-            existing_snapshot.version() + 1,
+        let new_log_segment = LogSegment::try_new(
+            new_ascending_commit_files,
+            checkpoint_parts,
+            log_root.clone(),
             new_version,
-        );
+        )?;
 
-        match new_log_segment {
-            Err(Error::EmptyLogSegment) => {
-                // no new log files at all, just return the existing snapshot
-                Ok(existing_snapshot.clone())
-            }
-            Ok(new_log_segment) if new_log_segment.ascending_commit_files.is_empty() => {
-                // no new commits, just return the existing snapshot
-                Ok(existing_snapshot.clone())
-            }
-            Ok(new_log_segment) if new_log_segment.has_checkpoint() => {
-                // we have a checkpoint in the new LogSegment, just construct a new snapshot from that
-                Self::try_new_from_log_segment(
-                    existing_snapshot.table_root().clone(),
-                    new_log_segment,
-                    engine,
-                )
-                .map(Arc::new)
-            }
-            Ok(new_log_segment) => {
-                // we have new commits and no new snapshot: we replay new commits for P+M and then
-                // create a new snapshot by combining LogSegments and building a new TableConfiguration
-                let (new_metadata, new_protocol) = new_log_segment.protocol_and_metadata(engine)?;
-                let table_configuration = TableConfiguration::new_from(
-                    existing_snapshot.table_configuration(),
-                    new_metadata,
-                    new_protocol,
-                    new_log_segment.end_version,
-                )?;
-                // NB: we must add the new log segment to the existing snapshot's log segment
-                Ok(Arc::new(Snapshot::new(
-                    LogSegment::try_concat(existing_snapshot.log_segment.clone(), new_log_segment)?,
-                    table_configuration,
-                )))
-            }
-            Err(e) => Err(e),
+        if new_log_segment.has_checkpoint() {
+            // we have a checkpoint in the new LogSegment, just construct a new snapshot from that
+            return Self::try_new_from_log_segment(
+                existing_snapshot.table_root().clone(),
+                new_log_segment,
+                engine,
+            )
+            .map(Arc::new);
         }
+
+        // we have new commits and no new checkpoint: we replay new commits for P+M and then
+        // create a new snapshot by combining LogSegments and building a new TableConfiguration
+        let (new_metadata, new_protocol) = new_log_segment.protocol_and_metadata(engine)?;
+        let table_configuration = TableConfiguration::new_from(
+            existing_snapshot.table_configuration(),
+            new_metadata,
+            new_protocol,
+            new_log_segment.end_version,
+        )?;
+        // NB: we must add the new log segment to the existing snapshot's log segment
+        let mut ascending_commit_files =
+            existing_snapshot.log_segment.ascending_commit_files.clone();
+        ascending_commit_files.extend(new_log_segment.ascending_commit_files);
+        let combined_log_segment =
+            LogSegment::try_new(ascending_commit_files, vec![], log_root, new_version)?;
+        Ok(Arc::new(Snapshot::new(
+            combined_log_segment,
+            table_configuration,
+        )))
     }
 
     /// Create a new [`Snapshot`] instance.
@@ -300,11 +317,17 @@ mod tests {
     use object_store::ObjectStore;
     use serde_json::json;
 
+    use crate::arrow::array::StringArray;
+    use crate::arrow::record_batch::RecordBatch;
+    use crate::parquet::arrow::ArrowWriter;
+
+    use crate::engine::arrow_data::ArrowEngineData;
     use crate::engine::default::executor::tokio::TokioBackgroundExecutor;
     use crate::engine::default::filesystem::ObjectStoreFileSystemClient;
     use crate::engine::default::DefaultEngine;
     use crate::engine::sync::SyncEngine;
     use crate::path::ParsedLogPath;
+    use crate::scan::test_utils::string_array_to_engine_data;
     use test_utils::{add_commit, delta_path_for_version};
 
     #[test]
@@ -362,10 +385,12 @@ mod tests {
 
         let engine = SyncEngine::new();
         let old_snapshot = Arc::new(Snapshot::try_new(url.clone(), &engine, Some(1)).unwrap());
-        // 1. new version < existing version
-        let snapshot = Snapshot::try_new_from(old_snapshot.clone(), &engine, Some(0)).unwrap();
-        let expected = Snapshot::try_new(url.clone(), &engine, Some(0)).unwrap();
-        assert_eq!(snapshot, expected.into());
+        // 1. new version < existing version: error
+        let snapshot_res = Snapshot::try_new_from(old_snapshot.clone(), &engine, Some(0));
+        assert!(matches!(
+            snapshot_res,
+            Err(Error::Generic(msg)) if msg == "Requested snapshot version 0 is older than snapshot hint version 1"
+        ));
 
         // 2. new version == existing version
         let snapshot = Snapshot::try_new_from(old_snapshot.clone(), &engine, Some(1)).unwrap();
@@ -442,40 +467,60 @@ mod tests {
             Arc::new(TokioBackgroundExecutor::new()),
         );
         let base_snapshot = Arc::new(Snapshot::try_new(url.clone(), &engine, Some(0))?);
-        let snapshot = Snapshot::try_new_from(base_snapshot.clone(), &engine, Some(1))?;
+        let snapshot = Snapshot::try_new_from(base_snapshot.clone(), &engine, None)?;
         let expected = Snapshot::try_new(url.clone(), &engine, Some(0))?;
         assert_eq!(snapshot, expected.into());
+        // version exceeds latest version of the table = err
+        assert!(matches!(
+            Snapshot::try_new_from(base_snapshot.clone(), &engine, Some(1)),
+            Err(Error::Generic(msg)) if msg == "Requested snapshot version 1 is newer than the latest version 0"
+        ));
 
-        //// TODO checkpoint test
-        //// b. log segment for old..=new version has a checkpoint (with new protocol/metadata)
-        //let store_3a = store.fork();
-        //let mut checkpoint1 = commit0.clone();
-        //checkpoint1[1] = json!({
-        //    "protocol": {
-        //        "minReaderVersion": 2,
-        //        "minWriterVersion": 5
-        //    }
-        //});
-        //checkpoint1[2]["partitionColumns"] = serde_json::to_value(["some_partition_column"])?;
-        //
-        // // Write the record batch to a Parquet file
-        // let mut buffer = vec![];
-        // let mut writer = ArrowWriter::try_new(&mut buffer, record_batch.schema(), None)?;
-        // writer.write(&record_batch)?;
-        // writer.close()?;
+        // b. log segment for old..=new version has a checkpoint (with new protocol/metadata)
+        let store_3a = store.fork();
+        let mut checkpoint1 = commit0.clone();
+        commit(&store_3a, 1, commit0.clone()).await;
+        checkpoint1[1] = json!({
+            "protocol": {
+                "minReaderVersion": 2,
+                "minWriterVersion": 5
+            }
+        });
+        checkpoint1[2]["partitionColumns"] = serde_json::to_value(["some_partition_column"])?;
 
-        // store
-        //     .put(
-        //         &delta_path_for_version(1, "checkpoint.parquet"),
-        //         buffer.into(),
-        //     )
-        //     .await
-        //     .unwrap();
-        // test_new_from(store_3a.into())?;
+        let handler = engine.get_json_handler();
+        let json_strings: StringArray = checkpoint1
+            .into_iter()
+            .map(|json| json.to_string())
+            .collect::<Vec<_>>()
+            .into();
+        let parsed = handler
+            .parse_json(
+                string_array_to_engine_data(json_strings),
+                crate::actions::get_log_schema().clone(),
+            )
+            .unwrap();
+        let checkpoint = ArrowEngineData::try_from_engine_data(parsed).unwrap();
+        let checkpoint: RecordBatch = checkpoint.into();
+
+        // Write the record batch to a Parquet file
+        let mut buffer = vec![];
+        let mut writer = ArrowWriter::try_new(&mut buffer, checkpoint.schema(), None)?;
+        writer.write(&checkpoint)?;
+        writer.close()?;
+
+        store
+            .put(
+                &delta_path_for_version(1, "checkpoint.parquet"),
+                buffer.into(),
+            )
+            .await
+            .unwrap();
+        test_new_from(store_3a.into())?;
 
         // c. log segment for old..=new version has no checkpoint
         // i. commits have (new protocol, new metadata)
-        let store_3c_i = store.fork();
+        let store_3c_i = Arc::new(store.fork());
         let mut commit1 = commit0.clone();
         commit1[1] = json!({
             "protocol": {
@@ -484,8 +529,17 @@ mod tests {
             }
         });
         commit1[2]["partitionColumns"] = serde_json::to_value(["some_partition_column"])?;
-        commit(&store_3c_i, 1, commit1).await;
-        test_new_from(store_3c_i.into())?;
+        commit(store_3c_i.as_ref(), 1, commit1).await;
+        test_new_from(store_3c_i.clone())?;
+
+        // new commits AND request version > end of log
+        let url = Url::parse("memory:///")?;
+        let engine = DefaultEngine::new(store_3c_i, Arc::new(TokioBackgroundExecutor::new()));
+        let base_snapshot = Arc::new(Snapshot::try_new(url.clone(), &engine, Some(0))?);
+        assert!(matches!(
+            Snapshot::try_new_from(base_snapshot.clone(), &engine, Some(2)),
+            Err(Error::Generic(msg)) if msg == "LogSegment end version 1 not the same as the specified end version 2"
+        ));
 
         // ii. commits have (new protocol, no metadata)
         let store_3c_ii = store.fork();
