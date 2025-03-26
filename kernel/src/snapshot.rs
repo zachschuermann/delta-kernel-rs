@@ -177,10 +177,14 @@ impl Snapshot {
         let mut ascending_commit_files =
             existing_snapshot.log_segment.ascending_commit_files.clone();
         ascending_commit_files.extend(new_log_segment.ascending_commit_files);
-        // we can pass in vec![] for checkpoint parts since we check for a checkpoint above. by the
-        // time we reach this line, we know there are no checkpoints in the new log segment.
-        let combined_log_segment =
-            LogSegment::try_new(ascending_commit_files, vec![], log_root, new_version)?;
+        // we can pass in just the old checkpoint parts since by the time we reach this line, we
+        // know there are no checkpoints in the new log segment.
+        let combined_log_segment = LogSegment::try_new(
+            ascending_commit_files,
+            existing_snapshot.log_segment.checkpoint_parts.clone(),
+            log_root,
+            new_version,
+        )?;
         Ok(Arc::new(Snapshot::new(
             combined_log_segment,
             table_configuration,
