@@ -167,7 +167,7 @@ impl Snapshot {
         // we have new commits and no new checkpoint: we replay new commits for P+M and then
         // create a new snapshot by combining LogSegments and building a new TableConfiguration
         let (new_metadata, new_protocol) = new_log_segment.protocol_and_metadata(engine)?;
-        let table_configuration = TableConfiguration::new_from(
+        let table_configuration = TableConfiguration::try_new_from(
             existing_snapshot.table_configuration(),
             new_metadata,
             new_protocol,
