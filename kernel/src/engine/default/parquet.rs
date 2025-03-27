@@ -11,6 +11,7 @@ use crate::parquet::arrow::arrow_reader::{
 };
 use crate::parquet::arrow::arrow_writer::ArrowWriter;
 use crate::parquet::arrow::async_reader::{ParquetObjectReader, ParquetRecordBatchStreamBuilder};
+use crate::parquet::format::FileMetaData;
 use futures::StreamExt;
 use object_store::path::Path;
 use object_store::DynObjectStore;
@@ -40,11 +41,29 @@ pub struct DefaultParquetHandler<E: TaskExecutor> {
 #[derive(Debug)]
 pub struct DataFileMetadata {
     file_meta: FileMeta,
+    file_stats: Option<FileStats>,
+}
+
+#[derive(Debug)]
+pub struct FileStats {
+    num_records: u64,
+    tight_bounds: bool,
+    column_stats: Vec<ColumnStat>,
+}
+
+#[derive(Debug)]
+pub struct ColumnStat {
+    min: Option<Vec<u8>>,
+    max: Option<Vec<u8>>,
+    null_count: u64,
 }
 
 impl DataFileMetadata {
-    pub fn new(file_meta: FileMeta) -> Self {
-        Self { file_meta }
+    pub fn new(file_meta: FileMeta, file_stats: Option<FileStats>) -> Self {
+        Self {
+            file_meta,
+            file_stats,
+        }
     }
 
     // convert DataFileMetadata into a record batch which matches the 'write_metadata' schema
@@ -60,6 +79,7 @@ impl DataFileMetadata {
                     last_modified,
                     size,
                 },
+            file_stats: _,
         } = self;
         let write_metadata_schema = crate::transaction::get_write_metadata_schema();
 
@@ -126,7 +146,9 @@ impl<E: TaskExecutor> DefaultParquetHandler<E> {
         let mut buffer = vec![];
         let mut writer = ArrowWriter::try_new(&mut buffer, record_batch.schema(), None)?;
         writer.write(record_batch)?;
-        writer.close()?; // writer must be closed to write footer
+        let file_metadata = writer.close()?; // writer must be closed to write footer
+
+        let stats = Self::gather_stats(file_metadata);
 
         let size = buffer.len();
         let name: String = format!("{}.parquet", Uuid::new_v4());
@@ -153,7 +175,39 @@ impl<E: TaskExecutor> DefaultParquetHandler<E> {
         }
 
         let file_meta = FileMeta::new(path, modification_time, size);
-        Ok(DataFileMetadata::new(file_meta))
+        Ok(DataFileMetadata::new(file_meta, Some(stats)))
+    }
+
+    fn gather_stats(file_metadata: FileMetaData) -> FileStats {
+        let mut tight_bounds = true;
+        let mut column_stats: Vec<ColumnStat> = vec![];
+        for row_group in file_metadata.row_groups.into_iter() {
+            for (index, column) in row_group.columns.into_iter().enumerate() {
+                let new_stats = column.meta_data.unwrap().statistics.unwrap();
+                if let Some(stats) = column_stats.get_mut(index) {
+                    stats.update(
+                        new_stats.min_value,
+                        new_stats.max_value,
+                        new_stats.null_count.unwrap().try_into().unwrap(),
+                    );
+                } else {
+                    column_stats.push(ColumnStat::new(
+                        new_stats.min_value,
+                        new_stats.max_value,
+                        new_stats.null_count.unwrap().try_into().unwrap(),
+                    ));
+                }
+                if !new_stats.is_max_value_exact.unwrap() || !new_stats.is_min_value_exact.unwrap()
+                {
+                    tight_bounds = false;
+                }
+            }
+        }
+        FileStats {
+            num_records: file_metadata.num_rows.try_into().unwrap(),
+            tight_bounds,
+            column_stats,
+        }
     }
 
     /// Write `data` to `{path}/<uuid>.parquet` as parquet using ArrowWriter and return the parquet
@@ -170,6 +224,38 @@ impl<E: TaskExecutor> DefaultParquetHandler<E> {
     ) -> DeltaResult<Box<dyn EngineData>> {
         let parquet_metadata = self.write_parquet(path, data).await?;
         parquet_metadata.as_record_batch(&partition_values, data_change)
+    }
+}
+
+impl ColumnStat {
+    fn new(min: Option<Vec<u8>>, max: Option<Vec<u8>>, null_count: u64) -> Self {
+        Self {
+            min,
+            max,
+            null_count,
+        }
+    }
+
+    fn update(&mut self, min: Option<Vec<u8>>, max: Option<Vec<u8>>, null_count: u64) {
+        if let Some(min) = min {
+            if let Some(ref mut current_min) = self.min {
+                if min < *current_min {
+                    *current_min = min;
+                }
+            } else {
+                self.min = Some(min);
+            }
+        }
+        if let Some(max) = max {
+            if let Some(ref mut current_max) = self.max {
+                if max > *current_max {
+                    *current_max = max;
+                }
+            } else {
+                self.max = Some(max);
+            }
+        }
+        self.null_count += null_count;
     }
 }
 
@@ -425,7 +511,7 @@ mod tests {
         let size = 1_000_000;
         let last_modified = 10000000000;
         let file_metadata = FileMeta::new(location.clone(), last_modified, size as usize);
-        let data_file_metadata = DataFileMetadata::new(file_metadata);
+        let data_file_metadata = DataFileMetadata::new(file_metadata, None);
         let partition_values = HashMap::from([("partition1".to_string(), "a".to_string())]);
         let data_change = true;
         let actual = data_file_metadata
@@ -495,7 +581,14 @@ mod tests {
                     last_modified,
                     size,
                 },
+            file_stats,
         } = write_metadata;
+
+        panic!(
+            "parquet_file: {:?}, last_modified: {}, size: {}, file_stats: {:?}",
+            parquet_file, last_modified, size, file_stats
+        );
+
         let expected_location = Url::parse("memory:///data/").unwrap();
 
         // head the object to get metadata
