@@ -174,12 +174,13 @@ impl Snapshot {
 
         if new_log_segment.has_checkpoint() {
             // we have a checkpoint in the new LogSegment, just construct a new snapshot from that
-            return Self::try_new_from_log_segment(
+            let snapshot = Self::try_new_from_log_segment(
                 existing_snapshot.table_root().clone(),
                 new_log_segment,
                 engine,
             )
-            .map(Arc::new);
+            .map(Arc::new)?;
+            return Ok(snapshot);
         }
 
         // remove the 'overlap' in commits, example:
