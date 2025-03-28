@@ -83,10 +83,12 @@ impl Snapshot {
     /// We implement a simple heuristic:
     /// 1. if the new version == existing version, just return the existing snapshot
     /// 2. if the new version < existing version, error: there is no optimization to do here
-    /// 3. list from (existing snapshot version + 1) onward
+    /// 3. list from (existing checkpoint version + 1) onward (or just existing snapshot version if
+    ///    no checkpoint)
     /// 4. a. if new checkpoint is found: just create a new snapshot from that checkpoint (and
     ///       commits after it)
-    ///    b. if no new checkpoint is found: do lightweight P+M replay on the latest commits
+    ///    b. if no new checkpoint is found: do lightweight P+M replay on the latest commits (after
+    ///    ensuring we only retain commits > any checkpoints)
     ///
     /// # Parameters
     ///
@@ -117,7 +119,15 @@ impl Snapshot {
 
         let log_root = existing_snapshot.log_segment.log_root.clone();
         let fs_client = engine.get_file_system_client();
-        let start_version = old_version + 1;
+
+        // start from either the checkpoint version + 1 or the existing snapshot version + 1
+        let start_version =
+            if let Some(checkpoint_version) = existing_snapshot.log_segment.checkpoint_version {
+                checkpoint_version + 1
+            } else {
+                old_version + 1
+            };
+
         // Check for new commits
         let (new_ascending_commit_files, checkpoint_parts) =
             log_segment::list_log_files_with_version(
@@ -130,7 +140,14 @@ impl Snapshot {
         // NB: we need to check both checkpoints and commits since we filter commits at and below
         // the checkpoint version. Example: if we have a checkpoint + commit at version 1, the log
         // listing above will only return the checkpoint and not the commit.
-        if new_ascending_commit_files.is_empty() && checkpoint_parts.is_empty() {
+        //
+        // Also note: we have two things to check here
+        // 1. if we listed from the checkpoint version, we check for the _same_ commits
+        // 2. if we listed from the existing snapshot version, we check for _empty_ commits
+        let has_new_commits = new_ascending_commit_files
+            == existing_snapshot.log_segment.ascending_commit_files
+            || new_ascending_commit_files.is_empty();
+        if has_new_commits && checkpoint_parts.is_empty() {
             match new_version {
                 Some(new_version) if new_version != old_version => {
                     // No new commits, but we are looking for a new version
@@ -146,8 +163,9 @@ impl Snapshot {
             }
         }
 
-        // create a log segment just from existing_snapshot.version -> new_version
-        let new_log_segment = LogSegment::try_new(
+        // create a log segment just from existing_checkpoint.version -> new_version
+        // OR could be from existing_snapshot.version -> new_version
+        let mut new_log_segment = LogSegment::try_new(
             new_ascending_commit_files,
             checkpoint_parts,
             log_root.clone(),
@@ -163,6 +181,21 @@ impl Snapshot {
             )
             .map(Arc::new);
         }
+
+        // remove the 'overlap' in commits, example:
+        //
+        //    old logsegment checkpoint1-commit1-commit2-commit3
+        // 1. new logsegment             commit1-commit2-commit3
+        // 2. new logsegment             commit1-commit2-commit3-commit4
+        // 3. new logsegment                     checkpoint2+commit2-commit3-commit4
+        //
+        // retain does
+        // 1. new logsegment             [empty] -> caught above
+        // 2. new logsegment             [commit4]
+        // 3. new logsegment             [checkpoint2-commit3] -> caught above
+        new_log_segment
+            .ascending_commit_files
+            .retain(|log_path| old_version < log_path.version);
 
         // we have new commits and no new checkpoint: we replay new commits for P+M and then
         // create a new snapshot by combining LogSegments and building a new TableConfiguration

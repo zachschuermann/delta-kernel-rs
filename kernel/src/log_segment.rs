@@ -41,6 +41,7 @@ mod tests;
 #[cfg_attr(feature = "developer-visibility", visibility::make(pub))]
 pub(crate) struct LogSegment {
     pub end_version: Version,
+    pub checkpoint_version: Option<Version>,
     pub log_root: Url,
     /// Sorted commit files in the log segment (ascending)
     pub ascending_commit_files: Vec<ParsedLogPath>,
@@ -56,9 +57,10 @@ impl LogSegment {
         end_version: Option<Version>,
     ) -> DeltaResult<Self> {
         // Commit file versions must be greater than the most recent checkpoint version if it exists
-        if let Some(checkpoint_file) = checkpoint_parts.first() {
+        let checkpoint_version = checkpoint_parts.first().map(|checkpoint_file| {
             ascending_commit_files.retain(|log_path| checkpoint_file.version < log_path.version);
-        }
+            checkpoint_file.version
+        });
 
         // We require that commits that are contiguous. In other words, there must be no gap between commit versions.
         require!(
@@ -103,6 +105,7 @@ impl LogSegment {
 
         Ok(LogSegment {
             end_version: effective_version,
+            checkpoint_version,
             log_root,
             ascending_commit_files,
             checkpoint_parts,
@@ -453,6 +456,9 @@ fn list_log_files(
 /// `(Vec<ParsedLogPath>, Vec<ParsedLogPath>)`. The commit files are guaranteed to be sorted in
 /// ascending order by version. The elements of `checkpoint_parts` are all the parts of the same
 /// checkpoint. Checkpoint parts share the same version.
+// TODO: encode some of these guarantees in the output types. e.g. we could have:
+// - SortedCommitFiles: Vec<ParsedLogPath>, is_ascending: bool, end_version: Version
+// - CheckpointParts: Vec<ParsedLogPath>, checkpoint_version: Version (guarantee all same version)
 pub(crate) fn list_log_files_with_version(
     fs_client: &dyn FileSystemClient,
     log_root: &Url,
