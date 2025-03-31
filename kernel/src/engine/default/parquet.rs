@@ -5,13 +5,23 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use crate::arrow::array::builder::{MapBuilder, MapFieldNames, StringBuilder};
-use crate::arrow::array::{BooleanArray, Int64Array, RecordBatch, StringArray};
+use crate::arrow::array::ArrayRef;
+use crate::arrow::array::{BooleanArray, Int64Array, RecordBatch, StringArray, StructArray};
+use crate::arrow::compute::kernels::aggregate::max as arrow_max;
+use crate::arrow::compute::kernels::aggregate::min as arrow_min;
+use crate::arrow::datatypes::{DataType, Field};
+use crate::parquet::arrow::arrow_reader::statistics::StatisticsConverter;
 use crate::parquet::arrow::arrow_reader::{
     ArrowReaderMetadata, ArrowReaderOptions, ParquetRecordBatchReaderBuilder,
 };
 use crate::parquet::arrow::arrow_writer::ArrowWriter;
 use crate::parquet::arrow::async_reader::{ParquetObjectReader, ParquetRecordBatchStreamBuilder};
+use crate::parquet::arrow::parquet_to_arrow_schema;
+use crate::parquet::file::metadata::RowGroupMetaData;
 use crate::parquet::format::FileMetaData;
+use crate::parquet::schema::types::from_thrift;
+use crate::parquet::schema::types::SchemaDescriptor;
+
 use futures::StreamExt;
 use object_store::path::Path;
 use object_store::DynObjectStore;
@@ -48,14 +58,8 @@ pub struct DataFileMetadata {
 pub struct FileStats {
     num_records: u64,
     tight_bounds: bool,
-    column_stats: Vec<ColumnStat>,
-}
-
-#[derive(Debug)]
-pub struct ColumnStat {
-    min: Option<Vec<u8>>,
-    max: Option<Vec<u8>>,
-    null_count: u64,
+    // includes min, max, null_count
+    column_stats: ArrayRef,
 }
 
 impl DataFileMetadata {
@@ -179,30 +183,75 @@ impl<E: TaskExecutor> DefaultParquetHandler<E> {
     }
 
     fn gather_stats(file_metadata: FileMetaData) -> FileStats {
-        let mut tight_bounds = true;
-        let mut column_stats: Vec<ColumnStat> = vec![];
-        for row_group in file_metadata.row_groups.into_iter() {
-            for (index, column) in row_group.columns.into_iter().enumerate() {
-                let new_stats = column.meta_data.unwrap().statistics.unwrap();
-                if let Some(stats) = column_stats.get_mut(index) {
-                    stats.update(
-                        new_stats.min_value,
-                        new_stats.max_value,
-                        new_stats.null_count.unwrap().try_into().unwrap(),
-                    );
-                } else {
-                    column_stats.push(ColumnStat::new(
-                        new_stats.min_value,
-                        new_stats.max_value,
-                        new_stats.null_count.unwrap().try_into().unwrap(),
-                    ));
-                }
-                if !new_stats.is_max_value_exact.unwrap() || !new_stats.is_min_value_exact.unwrap()
-                {
-                    tight_bounds = false;
-                }
-            }
-        }
+        let parquet_schema = Arc::new(SchemaDescriptor::new(
+            from_thrift(file_metadata.schema.as_ref()).unwrap(),
+        ));
+        let arrow_schema = parquet_to_arrow_schema(parquet_schema.as_ref(), None).unwrap();
+        let row_group_metadatas = file_metadata
+            .row_groups
+            .into_iter()
+            .map(|rg| RowGroupMetaData::from_thrift(parquet_schema.clone(), rg).unwrap())
+            .collect::<Vec<_>>();
+
+        // delta tracks tight/loose bounds at the file level, so we just check all the row groups
+        let tight_bounds = row_group_metadatas.iter().all(|row_group| {
+            row_group.columns().iter().all(|column| {
+                column
+                    .statistics()
+                    .is_some_and(|stats| stats.max_is_exact() && stats.min_is_exact())
+            })
+        });
+
+        let col_name = "a";
+
+        // statistics are per-colum, per-row group. stats converted helps us collect all the stats
+        // for a column into an array with a value per row group.
+        //
+        // TODO(1): this only works with top-level columns due to a limitation in
+        // [`parquet_column`](crate::parquet::arrow::parquet_column).
+        let stats_converter =
+            StatisticsConverter::try_new(col_name, &arrow_schema, parquet_schema.as_ref()).unwrap();
+
+        let min_stats = stats_converter
+            .row_group_mins(row_group_metadatas.iter())
+            .unwrap();
+        // downcast to the type of the field
+        let min_stats = min_stats
+            .as_ref()
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+
+        // TODO(2): aggregations only return native types. annoying we have to round-trip to native
+        // type.
+        let min_stats = arrow_min(&min_stats).unwrap();
+        let min_stats = Int64Array::from(vec![min_stats]);
+
+        let max_stats = stats_converter
+            .row_group_maxes(row_group_metadatas.iter())
+            .unwrap();
+        // downcast to the type of the field
+        let max_stats = max_stats
+            .as_ref()
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+
+        let max_stats = arrow_max(&max_stats).unwrap();
+        let max_stats = Int64Array::from(vec![max_stats]);
+
+        let column_stats = Arc::new(StructArray::from(vec![
+            (
+                Arc::new(Field::new("minValues", DataType::Int64, true)),
+                Arc::new(min_stats) as ArrayRef,
+            ),
+            (
+                Arc::new(Field::new("maxValues", DataType::Int64, true)),
+                Arc::new(max_stats) as ArrayRef,
+            ),
+        ]));
+
+        // need to add null_count
         FileStats {
             num_records: file_metadata.num_rows.try_into().unwrap(),
             tight_bounds,
@@ -224,38 +273,6 @@ impl<E: TaskExecutor> DefaultParquetHandler<E> {
     ) -> DeltaResult<Box<dyn EngineData>> {
         let parquet_metadata = self.write_parquet(path, data).await?;
         parquet_metadata.as_record_batch(&partition_values, data_change)
-    }
-}
-
-impl ColumnStat {
-    fn new(min: Option<Vec<u8>>, max: Option<Vec<u8>>, null_count: u64) -> Self {
-        Self {
-            min,
-            max,
-            null_count,
-        }
-    }
-
-    fn update(&mut self, min: Option<Vec<u8>>, max: Option<Vec<u8>>, null_count: u64) {
-        if let Some(min) = min {
-            if let Some(ref mut current_min) = self.min {
-                if min < *current_min {
-                    *current_min = min;
-                }
-            } else {
-                self.min = Some(min);
-            }
-        }
-        if let Some(max) = max {
-            if let Some(ref mut current_max) = self.max {
-                if max > *current_max {
-                    *current_max = max;
-                }
-            } else {
-                self.max = Some(max);
-            }
-        }
-        self.null_count += null_count;
     }
 }
 
@@ -562,10 +579,27 @@ mod tests {
             DefaultParquetHandler::new(store.clone(), Arc::new(TokioBackgroundExecutor::new()));
 
         let data = Box::new(ArrowEngineData::new(
-            RecordBatch::try_from_iter(vec![(
-                "a",
-                Arc::new(Int64Array::from(vec![1, 2, 3])) as Arc<dyn Array>,
-            )])
+            RecordBatch::try_from_iter(vec![
+                (
+                    "a",
+                    Arc::new(StructArray::from(vec![
+                        (
+                            // Arc::new(Field::new("s", DataType::Utf8, true)),
+                            // Arc::new(StringArray::from(vec!["a", "b", "c"])) as ArrayRef,
+                            Arc::new(Field::new("s", DataType::Int64, true)),
+                            Arc::new(Int64Array::from(vec![1, 10, 100])) as ArrayRef,
+                        ),
+                        (
+                            Arc::new(Field::new("i", DataType::Int64, true)),
+                            Arc::new(Int64Array::from(vec![0, 1, 2])) as ArrayRef,
+                        ),
+                    ])) as Arc<dyn Array>,
+                ),
+                (
+                    "b",
+                    Arc::new(Int64Array::from(vec![4, 5, 6])) as Arc<dyn Array>,
+                ),
+            ])
             .unwrap(),
         ));
 
@@ -584,7 +618,7 @@ mod tests {
             file_stats,
         } = write_metadata;
 
-        panic!(
+        println!(
             "parquet_file: {:?}, last_modified: {}, size: {}, file_stats: {:?}",
             parquet_file, last_modified, size, file_stats
         );
