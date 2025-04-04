@@ -86,7 +86,7 @@ impl Snapshot {
     /// 3. list from (existing checkpoint version + 1) onward (or just existing snapshot version if
     ///    no checkpoint)
     /// 4. a. if new checkpoint is found: just create a new snapshot from that checkpoint (and
-    ///       commits after it)
+    ///    commits after it)
     ///    b. if no new checkpoint is found: do lightweight P+M replay on the latest commits (after
     ///    ensuring we only retain commits > any checkpoints)
     ///
