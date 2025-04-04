@@ -120,12 +120,14 @@ impl Snapshot {
         let log_root = existing_snapshot.log_segment.log_root.clone();
         let fs_client = engine.get_file_system_client();
 
-        // start from either the checkpoint version + 1 or the existing snapshot version + 1
+        // start from either the checkpoint version + 1 or version 1
         let start_version =
             if let Some(checkpoint_version) = existing_snapshot.log_segment.checkpoint_version {
                 checkpoint_version + 1
             } else {
-                old_version + 1
+                // if there is no checkpoint, the existing log segment must start at 0, thus, we
+                // list from 1
+                1
             };
 
         // Check for new commits
@@ -144,10 +146,10 @@ impl Snapshot {
         // Also note: we have two things to check here
         // 1. if we listed from the checkpoint version, we check for the _same_ commits
         // 2. if we listed from the existing snapshot version, we check for _empty_ commits
-        let has_new_commits = new_ascending_commit_files
+        let no_new_commits = new_ascending_commit_files
             == existing_snapshot.log_segment.ascending_commit_files
             || new_ascending_commit_files.is_empty();
-        if has_new_commits && checkpoint_parts.is_empty() {
+        if no_new_commits && checkpoint_parts.is_empty() {
             match new_version {
                 Some(new_version) if new_version != old_version => {
                     // No new commits, but we are looking for a new version
@@ -172,15 +174,14 @@ impl Snapshot {
             new_version,
         )?;
 
-        if new_log_segment.has_checkpoint() {
+        if !new_log_segment.checkpoint_parts.is_empty() {
             // we have a checkpoint in the new LogSegment, just construct a new snapshot from that
             let snapshot = Self::try_new_from_log_segment(
                 existing_snapshot.table_root().clone(),
                 new_log_segment,
                 engine,
-            )
-            .map(Arc::new)?;
-            return Ok(snapshot);
+            );
+            return Ok(Arc::new(snapshot?));
         }
 
         // remove the 'overlap' in commits, example:

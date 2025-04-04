@@ -75,14 +75,14 @@ impl LogSegment {
 
         // There must be no gap between a checkpoint and the first commit version. Note that
         // that all checkpoint parts share the same version.
-        if let (Some(checkpoint_file), Some(commit_file)) =
-            (checkpoint_parts.first(), ascending_commit_files.first())
+        if let (Some(checkpoint_version), Some(commit_file)) =
+            (checkpoint_version, ascending_commit_files.first())
         {
             require!(
-                checkpoint_file.version + 1 == commit_file.version,
+                checkpoint_version + 1 == commit_file.version,
                 Error::InvalidCheckpoint(format!(
                     "Gap between checkpoint version {} and next commit {}",
-                    checkpoint_file.version, commit_file.version,
+                    checkpoint_version, commit_file.version,
                 ))
             )
         }
@@ -415,11 +415,6 @@ impl LogSegment {
         });
         // read the same protocol and metadata schema for both commits and checkpoints
         self.read_actions(engine, schema.clone(), schema, META_PREDICATE.clone())
-    }
-
-    /// Return whether or not the LogSegment contains a checkpoint.
-    pub(crate) fn has_checkpoint(&self) -> bool {
-        !self.checkpoint_parts.is_empty()
     }
 }
 
