@@ -166,7 +166,7 @@ impl Snapshot {
         }
 
         // create a log segment just from existing_checkpoint.version -> new_version
-        // OR could be from existing_snapshot.version -> new_version
+        // OR could be from 1 -> new_version
         let mut new_log_segment = LogSegment::try_new(
             new_ascending_commit_files,
             checkpoint_parts,
