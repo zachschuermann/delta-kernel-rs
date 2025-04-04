@@ -256,7 +256,7 @@ impl Snapshot {
         self.table_configuration().version()
     }
 
-    /// Table [`Schema`] at this `Snapshot`s version.
+    /// Table [`type@Schema`] at this `Snapshot`s version.
     pub fn schema(&self) -> SchemaRef {
         self.table_configuration.schema()
     }
@@ -301,11 +301,12 @@ impl Snapshot {
     }
 }
 
+// Note: Schema can not be derived because the checkpoint schema is only known at runtime.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "developer-visibility", visibility::make(pub))]
 #[cfg_attr(not(feature = "developer-visibility"), visibility::make(pub(crate)))]
-struct CheckpointMetadata {
+struct LastCheckpointHint {
     /// The version of the table when the last checkpoint was made.
     #[allow(unreachable_pub)] // used by acceptance tests (TODO make an fn accessor?)
     pub version: Version,
@@ -334,7 +335,7 @@ struct CheckpointMetadata {
 fn read_last_checkpoint(
     fs_client: &dyn FileSystemClient,
     log_root: &Url,
-) -> DeltaResult<Option<CheckpointMetadata>> {
+) -> DeltaResult<Option<LastCheckpointHint>> {
     let file_path = log_root.join(LAST_CHECKPOINT_FILE_NAME)?;
     match fs_client
         .read_files(vec![(file_path, None)])
@@ -371,7 +372,7 @@ mod tests {
     use crate::engine::default::DefaultEngine;
     use crate::engine::sync::SyncEngine;
     use crate::path::ParsedLogPath;
-    use crate::scan::test_utils::string_array_to_engine_data;
+    use crate::utils::test_utils::string_array_to_engine_data;
     use test_utils::{add_commit, delta_path_for_version};
 
     #[test]
