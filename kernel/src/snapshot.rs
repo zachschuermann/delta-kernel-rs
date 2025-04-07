@@ -168,16 +168,20 @@ impl Snapshot {
         )?;
 
         let new_end_version = new_log_segment.end_version;
-        if new_end_version < old_version {
-            // we should never see a new log segment with a version < the existing snapshot
-            // version, that would mean a commit was incorrectly deleted from the log
-            return Err(Error::Generic(format!(
+        match new_end_version.cmp(&old_version) {
+            std::cmp::Ordering::Less => {
+                // we should never see a new log segment with a version < the existing snapshot
+                // version, that would mean a commit was incorrectly deleted from the log
+                return Err(Error::Generic(format!(
                 "Unexpected state: The newest version in the log {} is older than the old version {}",
                 new_end_version, old_version
             )));
-        } else if new_end_version == old_version {
-            // No new commits, just return the same snapshot
-            return Ok(existing_snapshot.clone());
+            }
+            std::cmp::Ordering::Equal => {
+                // No new commits, just return the same snapshot
+                return Ok(existing_snapshot.clone());
+            }
+            std::cmp::Ordering::Greater => (), // expected
         }
 
         if !new_log_segment.checkpoint_parts.is_empty() {
