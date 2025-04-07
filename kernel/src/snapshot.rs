@@ -119,7 +119,7 @@ impl Snapshot {
         }
 
         let log_root = old_log_segment.log_root.clone();
-        let fs_client = engine.get_file_system_client();
+        let fs_client = engine.file_system_client();
 
         // Start listing just after the previous segment's checkpoint, if any
         let listing_start = old_log_segment.checkpoint_version.unwrap_or(0) + 1;
@@ -533,7 +533,7 @@ mod tests {
         });
         checkpoint1[2]["partitionColumns"] = serde_json::to_value(["some_partition_column"])?;
 
-        let handler = engine.get_json_handler();
+        let handler = engine.json_handler();
         let json_strings: StringArray = checkpoint1
             .into_iter()
             .map(|json| json.to_string())
