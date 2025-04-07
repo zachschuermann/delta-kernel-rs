@@ -142,14 +142,7 @@ impl Snapshot {
         // NB: we need to check both checkpoints and commits since we filter commits at and below
         // the checkpoint version. Example: if we have a checkpoint + commit at version 1, the log
         // listing above will only return the checkpoint and not the commit.
-        //
-        // Also note: we have two things to check here
-        // 1. if we listed from the checkpoint version, we check for the _same_ commits
-        // 2. if we listed from the existing snapshot version, we check for _empty_ commits
-        let no_new_commits = new_ascending_commit_files
-            == existing_snapshot.log_segment.ascending_commit_files
-            || new_ascending_commit_files.is_empty();
-        if no_new_commits && checkpoint_parts.is_empty() {
+        if new_ascending_commit_files.is_empty() && checkpoint_parts.is_empty() {
             match new_version {
                 Some(new_version) if new_version != old_version => {
                     // No new commits, but we are looking for a new version
@@ -174,6 +167,19 @@ impl Snapshot {
             new_version,
         )?;
 
+        let new_end_version = new_log_segment.end_version;
+        if new_end_version < old_version {
+            // we should never see a new log segment with a version < the existing snapshot
+            // version, that would mean a commit was incorrectly deleted from the log
+            return Err(Error::Generic(format!(
+                "Unexpected state: The newest version in the log {} is older than the old version {}",
+                new_end_version, old_version
+            )));
+        } else if new_end_version == old_version {
+            // No new commits, just return the same snapshot
+            return Ok(existing_snapshot.clone());
+        }
+
         if !new_log_segment.checkpoint_parts.is_empty() {
             // we have a checkpoint in the new LogSegment, just construct a new snapshot from that
             let snapshot = Self::try_new_from_log_segment(
@@ -184,7 +190,8 @@ impl Snapshot {
             return Ok(Arc::new(snapshot?));
         }
 
-        // remove the 'overlap' in commits, example:
+        // after this point, we incrementally update the snapshot with the new log segment.
+        // first we remove the 'overlap' in commits, example:
         //
         //    old logsegment checkpoint1-commit1-commit2-commit3
         // 1. new logsegment             commit1-commit2-commit3
