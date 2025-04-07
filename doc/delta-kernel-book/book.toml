@@ -1,0 +1,6 @@
+[book]
+authors = ["Zach Schuermann"]
+language = "en"
+multilingual = false
+src = "src"
+title = "Delta Kernel Documentation"
