@@ -101,6 +101,7 @@ impl Snapshot {
         engine: &dyn Engine,
         version: impl Into<Option<Version>>,
     ) -> DeltaResult<Arc<Self>> {
+        let old_log_segment = &existing_snapshot.log_segment;
         let old_version = existing_snapshot.version();
         let new_version = version.into();
         if let Some(new_version) = new_version {
@@ -117,25 +118,18 @@ impl Snapshot {
             }
         }
 
-        let log_root = existing_snapshot.log_segment.log_root.clone();
+        let log_root = old_log_segment.log_root.clone();
         let fs_client = engine.get_file_system_client();
 
-        // start from either the checkpoint version + 1 or version 1
-        let start_version =
-            if let Some(checkpoint_version) = existing_snapshot.log_segment.checkpoint_version {
-                checkpoint_version + 1
-            } else {
-                // if there is no checkpoint, the existing log segment must start at 0, thus, we
-                // list from 1
-                1
-            };
+        // Start listing just after the previous segment's checkpoint, if any
+        let listing_start = old_log_segment.checkpoint_version.unwrap_or(0) + 1;
 
         // Check for new commits
         let (new_ascending_commit_files, checkpoint_parts) =
             log_segment::list_log_files_with_version(
                 fs_client.as_ref(),
                 &log_root,
-                Some(start_version),
+                Some(listing_start),
                 new_version,
             )?;
 
@@ -168,23 +162,19 @@ impl Snapshot {
         )?;
 
         let new_end_version = new_log_segment.end_version;
-        match new_end_version.cmp(&old_version) {
-            std::cmp::Ordering::Less => {
-                // we should never see a new log segment with a version < the existing snapshot
-                // version, that would mean a commit was incorrectly deleted from the log
-                return Err(Error::Generic(format!(
+        if new_end_version < old_version {
+            // we should never see a new log segment with a version < the existing snapshot
+            // version, that would mean a commit was incorrectly deleted from the log
+            return Err(Error::Generic(format!(
                 "Unexpected state: The newest version in the log {} is older than the old version {}",
-                new_end_version, old_version
-            )));
-            }
-            std::cmp::Ordering::Equal => {
-                // No new commits, just return the same snapshot
-                return Ok(existing_snapshot.clone());
-            }
-            std::cmp::Ordering::Greater => (), // expected
+                new_end_version, old_version)));
+        }
+        if new_end_version == old_version {
+            // No new commits, just return the same snapshot
+            return Ok(existing_snapshot.clone());
         }
 
-        if !new_log_segment.checkpoint_parts.is_empty() {
+        if new_log_segment.checkpoint_version.is_some() {
             // we have a checkpoint in the new LogSegment, just construct a new snapshot from that
             let snapshot = Self::try_new_from_log_segment(
                 existing_snapshot.table_root().clone(),
@@ -220,14 +210,13 @@ impl Snapshot {
             new_log_segment.end_version,
         )?;
         // NB: we must add the new log segment to the existing snapshot's log segment
-        let mut ascending_commit_files =
-            existing_snapshot.log_segment.ascending_commit_files.clone();
+        let mut ascending_commit_files = old_log_segment.ascending_commit_files.clone();
         ascending_commit_files.extend(new_log_segment.ascending_commit_files);
         // we can pass in just the old checkpoint parts since by the time we reach this line, we
         // know there are no checkpoints in the new log segment.
         let combined_log_segment = LogSegment::try_new(
             ascending_commit_files,
-            existing_snapshot.log_segment.checkpoint_parts.clone(),
+            old_log_segment.checkpoint_parts.clone(),
             log_root,
             new_version,
         )?;
