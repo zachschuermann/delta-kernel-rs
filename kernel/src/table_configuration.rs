@@ -99,7 +99,7 @@ impl TableConfiguration {
         if new_metadata.is_none() && new_protocol.is_none() {
             return Ok(Self {
                 version: new_version,
-                ..(*table_configuration).clone()
+                ..table_configuration.clone()
             });
         }
 
