@@ -4,47 +4,50 @@
 
 [Full Changelog](https://github.com/delta-io/delta-kernel-rs/compare/v0.8.0...v0.9.0)
 
+### 🏗️ Breaking changes
+1. Change `MetadataValue::Number(i32)` to `MetadataValue::Number(i64)` ([#733])
+2. Get prefix from offset path: `DefaultEngine::new` no longer requires a `table_root` parameter
+   and `list_from` consistently returns keys greater than the offset ([#699])
+3. Make `snapshot.schema()` return a `SchemaRef` ([#751])
+4. Make `visit_expression_internal` private, and `unwrap_kernel_expression` pub(crate) ([#767])
+5. Make actions types `pub(crate)` instead of `pub` ([#405])
+6. New `null_row` ExpressionHandler API ([#662])
+7. Rename enums `ReaderFeatures` -> `ReaderFeature` and `WriterFeatures` -> `WriterFeature` ([#802])
+8. Remove `get_` prefix from engine getters ([#804])
+9. Rename `FileSystemClient` to `StorageHandler` ([#805])
+10. Adopt types for table features (New `ReadFeature::Unknown(String)` and
+    (`WriterFeature::Unknown(String)`) ([#684])
 
 ### 🚀 Features / new APIs
 
-1. Extract & insert sidecar batches in `replay`'s action iterator ([#679])
+1. (`v2Checkpoint`) Extract & insert sidecar batches in `replay`'s action iterator ([#679])
 2. Support the `v2Checkpoint` reader/writer feature ([#685])
-3. Add check for whether appendOnly table feature is supported or enabled  ([#664])
+3. Add check for whether `appendOnly` table feature is supported or enabled  ([#664])
 4. Add basic partition pruning support ([#713])
 5. Add `DeletionVectors` to supported writer features ([#735])
 6. Add writer version 2/invariant table feature support ([#734])
-7. Robustify pre-signed URL checks ([#760])
-8. New `null_row` ExpressionHandler API ([#662])
-9. Add `CheckpointMetadata` action ([#781])
-10. Add classic and uuid parquet checkpoint path generation ([#782])
-11. `Snapshot::try_new_from()` API ([#549])
+7. Improved pre-signed URL checks ([#760])
+8. Add `CheckpointMetadata` action ([#781])
+9. Add classic and uuid parquet checkpoint path generation ([#782])
+10. New `Snapshot::try_new_from()` API ([#549])
 
 ### 🐛 Bug Fixes
 
-1. Change metadata values for column metadata to i64 ([#733])
-2. Return `Error::unsupported` instead of panic in `Scalar::to_array(MapType)` ([#757])
-3. Get prefix from offset path ([#699])
-4. Remove 'default-members' in workspace, default to all crates ([#752])
-5. Make actions types pub(crate) instead of pub ([#405])
-6. Update compilation error and clippy lints for rustc 1.86 ([#800])
+1. Return `Error::unsupported` instead of panic in `Scalar::to_array(MapType)` ([#757])
+2. Remove 'default-members' in workspace, default to all crates ([#752])
+3. Update compilation error and clippy lints for rustc 1.86 ([#800])
 
 ### 🚜 Refactor
 
 1. Split up `arrow_expression` module ([#750])
 2. Flatten deeply nested match statement ([#756])
-3. Make `snapshot.schema()` return a `SchemaRef` ([#751])
-4. Simplify predicate evaluation by supporting inversion ([#761])
-5. Rename `LogSegment::replay` to `LogSegment::read_actions` ([#766])
-6. Make visit_expression_internal  private, and unwrap_kernel_expression pub(crate) ([#767])
-7. Extract deduplication logic from `AddRemoveDedupVisitor` into embeddable `FileActionsDeduplicator` ([#769])
-8. Move testing helper function to `test_utils` mod ([#794])
-9. Rename `_last_checkpoint` from `CheckpointMetadata` to `LastCheckpointHint` ([#789])
-10. Rename enums of ReaderFeatures and WriterFeatures  ([#802])
-11. Use ExpressionTransform instead of adhoc expression traversals ([#803])
-12. Extract log replay processing structure into `LogReplayProcessor` trait ([#774])
-13. Remove get_ prefix from engine getters ([#804])
-14. Rename FileSystemClient to StorageHandler ([#805])
-15. Adopt types for table features ([#684])
+3. Simplify predicate evaluation by supporting inversion ([#761])
+4. Rename `LogSegment::replay` to `LogSegment::read_actions` ([#766])
+5. Extract deduplication logic from `AddRemoveDedupVisitor` into embeddable `FileActionsDeduplicator` ([#769])
+6. Move testing helper function to `test_utils` mod ([#794])
+7. Rename `_last_checkpoint` from `CheckpointMetadata` to `LastCheckpointHint` ([#789])
+8. Use ExpressionTransform instead of adhoc expression traversals ([#803])
+9. Extract log replay processing structure into `LogReplayProcessor` trait ([#774])
 
 ### 🧪 Testing
 
