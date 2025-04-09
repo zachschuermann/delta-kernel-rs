@@ -1,5 +1,13 @@
 # Welcome to Delta Kernel
 
+<div class="warning">
+
+Warning!
+
+This is heavily work-in-progress documentation for the delta kernel.
+
+</div>
+
 Delta kernel is a query-engine agnostic library to provide Delta support in any engine.
 
 There are currently two implementations of the Delta kernel: a native (rust) implementation (with a
