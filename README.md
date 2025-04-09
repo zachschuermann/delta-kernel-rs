@@ -105,11 +105,6 @@ and then checking what version of `object_store` it depends on.
 There are some example programs showing how `delta-kernel-rs` can be used to interact with delta
 tables. They live in the [`kernel/examples`](kernel/examples) directory.
 
-## Release cadence
-
-We attempt to release the crate every 2 weeks (in an effort to keep latency between merge and
-shipping low); though, sometimes releases may take longer.
-
 ## Development
 
 delta-kernel-rs is still under heavy development but follows conventions adopted by most Rust
