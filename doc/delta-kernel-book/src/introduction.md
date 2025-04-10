@@ -33,5 +33,17 @@ book is only concerned with the rust implementation.
 ```
 
 
+The read path follows the following (rough) pattern:
+1. Kernel resolves metadata
+2. ships `ScanMetadata` to engine which includes files to scan, transforms
+3. engine reads + applies transforms
+
+Write path is largely the reverse:
+1. Kernel resolves metadata during transaction creation
+2. ships `WriteMetadata` to engine which includes files to write, transform
+3. engine applies transforms and writes files
+4. engine calls `Kernel::commit` to finalize the transaction
+
+
 [delta-kernel-rs]: https://github.com/delta-io/delta-kernel-rs
 [delta-kernel-java]: https://github.com/delta-io/delta/tree/master/kernel
