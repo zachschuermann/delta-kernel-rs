@@ -17,6 +17,16 @@
 9. Rename `FileSystemClient` to `StorageHandler` ([#805])
 10. Adopt types for table features (New `ReadFeature::Unknown(String)` and
     (`WriterFeature::Unknown(String)`) ([#684])
+11. Renamed `ScanData` to `ScanMetadata` ([#817])
+    - rename `ScanData` to `ScanMetadata`
+    - rename `Scan::scan_data()` to `Scan::scan_metadata()`
+    - (ffi) rename `free_kernel_scan_data()` to `free_scan_metadata_iter()`
+    - (ffi) rename `kernel_scan_data_next()` to `scan_metadata_next()`
+    - (ffi) rename `visit_scan_data()` to `visit_scan_metadata()`
+    - (ffi) rename `kernel_scan_data_init()` to `scan_metadata_iter_init()`
+    - (ffi) rename `KernelScanDataIterator` to `ScanMetadataIterator`
+    - (ffi) rename `SharedScanDataIterator` to `SharedScanMetadataIterator`
+12. `ScanMetadata` is now a struct (instead of tuple) with new `FiltereEngineData` type  ([#768])
 
 ### 🚀 Features / new APIs
 
@@ -99,6 +109,8 @@
 [#805]: https://github.com/delta-io/delta-kernel-rs/pull/805
 [#549]: https://github.com/delta-io/delta-kernel-rs/pull/549
 [#684]: https://github.com/delta-io/delta-kernel-rs/pull/684
+[#817]: https://github.com/delta-io/delta-kernel-rs/pull/817
+[#768]: https://github.com/delta-io/delta-kernel-rs/pull/768
 
 
 ## [v0.8.0](https://github.com/delta-io/delta-kernel-rs/tree/v0.8.0/) (2025-03-04)
