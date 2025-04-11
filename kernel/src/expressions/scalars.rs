@@ -3,6 +3,7 @@ use std::fmt::{Display, Formatter};
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, TimeZone, Utc};
 
+use crate::actions::schemas::ToDataType;
 use crate::schema::{ArrayType, DataType, PrimitiveType, StructField};
 use crate::utils::require;
 use crate::{DeltaResult, Error};
@@ -335,6 +336,15 @@ impl<T: Into<Scalar> + Copy> From<&T> for Scalar {
 impl From<&[u8]> for Scalar {
     fn from(b: &[u8]) -> Self {
         Self::Binary(b.into())
+    }
+}
+
+impl<T: Into<Scalar> + ToDataType> From<Option<T>> for Scalar {
+    fn from(val: Option<T>) -> Self {
+        match val {
+            Some(v) => v.into(),
+            None => Scalar::Null(T::to_data_type()),
+        }
     }
 }
 

@@ -386,7 +386,7 @@ trait EvaluationHandlerExtension: EvaluationHandler {
 }
 
 // Auto-implement the extension trait for all EvaluationHandlers
-impl<T: EvaluationHandler> EvaluationHandlerExtension for T {}
+impl<T: EvaluationHandler + ?Sized> EvaluationHandlerExtension for T {}
 
 /// A trait that allows converting a type into EngineData
 ///
@@ -394,7 +394,7 @@ impl<T: EvaluationHandler> EvaluationHandlerExtension for T {}
 /// which leverages the traits `ToDataType` and `Into<Scalar>` for struct fields
 /// to convert a struct into EngineData.
 #[allow(unused)]
-pub(crate) trait ToEngineData {
+pub(crate) trait IntoEngineData {
     /// Convert this type into EngineData using the provided engine
     fn into_engine_data(self, engine: &dyn Engine) -> DeltaResult<Box<dyn EngineData>>;
 }

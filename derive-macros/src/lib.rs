@@ -164,24 +164,27 @@ pub fn into_engine_data_derive(input: proc_macro::TokenStream) -> proc_macro::To
     };
 
     let field_idents = fields.iter().map(|f| &f.ident);
-    let field_types = fields.iter().map(|f| &f.ty);
+    // let field_types = fields.iter().map(|f| &f.ty);
 
     let expanded = quote! {
+        use crate::actions::schemas::ToSchema as _;
+        use crate::EvaluationHandlerExtension as _;
         #[automatically_derived]
-        impl ::delta_kernel::ToEngineData for #struct_name
+        impl crate::IntoEngineData for #struct_name
         where
-            Self: ::delta_kernel::actions::schemas::ToDataType,
-            #(#field_types: Into<::delta_kernel::expressions::Scalar>),*
+            Self: crate::actions::schemas::ToSchema,
+            // #(#field_types: Into<crate::expressions::Scalar>),*
         {
             fn into_engine_data(
                 self,
-                engine: &dyn ::delta_kernel::Engine)
-            -> ::delta_kernel::DeltaResult<Box<dyn ::delta_kernel::EngineData>> {
+                engine: &dyn crate::Engine)
+            -> crate::DeltaResult<Box<dyn crate::EngineData>> {
                 let values = [
                     #(self.#field_idents.into()),*
                 ];
                 let evaluator = engine.evaluation_handler();
-                evaluator.create_one(self.to_schema(), &values)
+                let schema = std::sync::Arc::new(Self::to_schema()); // fixme remove arc
+                evaluator.create_one(schema, &values)
             }
         }
     };
