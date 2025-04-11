@@ -136,7 +136,7 @@ fn gen_schema_fields(data: &Data) -> TokenStream {
 }
 
 /// Derive an IntoEngineData trait for a struct that implements ToDataType and has all fields
-/// implement Into<Scalar>.
+/// implement `Into<Scalar>`.
 #[proc_macro_derive(IntoEngineData)]
 pub fn into_engine_data_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
