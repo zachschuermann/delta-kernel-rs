@@ -134,3 +134,54 @@ fn gen_schema_fields(data: &Data) -> TokenStream {
     });
     quote! { #(#schema_fields),* }
 }
+
+/// Derive an IntoEngineData trait for a struct that implements ToDataType and has all fields
+/// implement Into<Scalar>.
+#[proc_macro_derive(IntoEngineData)]
+pub fn into_engine_data_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let struct_name = &input.ident;
+    let fields = match &input.data {
+        Data::Struct(data) => match &data.fields {
+            Fields::Named(fields) => &fields.named,
+            _ => {
+                return Error::new(
+                    struct_name.span(),
+                    "IntoEngineData can only be derived for structs with named fields",
+                )
+                .to_compile_error()
+                .into()
+            }
+        },
+        _ => {
+            return Error::new(
+                struct_name.span(),
+                "IntoEngineData can only be derived for structs",
+            )
+            .to_compile_error()
+            .into()
+        }
+    };
+
+    let field_idents = fields.iter().map(|f| &f.ident);
+    let field_types = fields.iter().map(|f| &f.ty);
+
+    let expanded = quote! {
+        #[automatically_derived]
+        impl ToEngineData for #struct_name
+        where
+            Self: ToDataType,
+            #(#field_types: Into<Scalar>),*
+        {
+            fn into_engine_data(self, engine: &dyn Engine) -> DeltaResult<Box<dyn EngineData>> {
+                let values = [
+                    #(self.#field_idents.into()),*
+                ];
+                let evaluator = engine.evaluation_handler();
+                evaluator.create_one(self.to_schema(), &values)
+            }
+        }
+    };
+
+    proc_macro::TokenStream::from(expanded)
+}
