@@ -168,12 +168,15 @@ pub fn into_engine_data_derive(input: proc_macro::TokenStream) -> proc_macro::To
 
     let expanded = quote! {
         #[automatically_derived]
-        impl ToEngineData for #struct_name
+        impl ::delta_kernel::ToEngineData for #struct_name
         where
-            Self: ToDataType,
-            #(#field_types: Into<Scalar>),*
+            Self: ::delta_kernel::actions::schemas::ToDataType,
+            #(#field_types: Into<::delta_kernel::expressions::Scalar>),*
         {
-            fn into_engine_data(self, engine: &dyn Engine) -> DeltaResult<Box<dyn EngineData>> {
+            fn into_engine_data(
+                self,
+                engine: &dyn ::delta_kernel::Engine)
+            -> ::delta_kernel::DeltaResult<Box<dyn ::delta_kernel::EngineData>> {
                 let values = [
                     #(self.#field_idents.into()),*
                 ];
