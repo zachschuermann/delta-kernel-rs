@@ -91,7 +91,7 @@ pub(crate) fn get_log_commit_info_schema() -> &'static SchemaRef {
     &LOG_COMMIT_INFO_SCHEMA
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Schema)]
+#[derive(Debug, Clone, PartialEq, Eq, Schema, IntoEngineData)]
 #[cfg_attr(feature = "developer-visibility", visibility::make(pub))]
 #[cfg_attr(test, derive(Serialize), serde(rename_all = "camelCase"))]
 pub(crate) struct Format {
@@ -110,7 +110,7 @@ impl Default for Format {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Schema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Schema, IntoEngineData)]
 #[cfg_attr(test, derive(Serialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "developer-visibility", visibility::make(pub))]
 pub(crate) struct Metadata {
@@ -133,6 +133,19 @@ pub(crate) struct Metadata {
 }
 
 impl Metadata {
+    pub(crate) fn new(name: String, schema: StructType, partition_columns: Vec<String>) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: Some(name),
+            description: None,
+            format: Format::default(),
+            schema_string: serde_json::to_string(&schema).unwrap_or_default(),
+            partition_columns,
+            created_time: Some(chrono::Utc::now().timestamp_millis()),
+            configuration: HashMap::new(),
+        }
+    }
+
     pub(crate) fn try_new_from_data(data: &dyn EngineData) -> DeltaResult<Option<Metadata>> {
         let mut visitor = MetadataVisitor::default();
         visitor.visit_rows_of(data)?;
@@ -163,7 +176,7 @@ impl Metadata {
     }
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Eq, Schema, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Schema, Serialize, Deserialize, IntoEngineData)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "developer-visibility", visibility::make(pub))]
 // TODO move to another module so that we disallow constructing this struct without using the
@@ -183,6 +196,17 @@ pub(crate) struct Protocol {
     /// write this table (exist only when minWriterVersion is set to 7)
     #[serde(skip_serializing_if = "Option::is_none")]
     writer_features: Option<Vec<WriterFeature>>,
+}
+
+impl Default for Protocol {
+    fn default() -> Self {
+        Protocol {
+            min_reader_version: 3,
+            min_writer_version: 7,
+            reader_features: Some(SUPPORTED_READER_FEATURES.to_vec()),
+            writer_features: Some(SUPPORTED_WRITER_FEATURES.to_vec()),
+        }
+    }
 }
 
 fn parse_features<T>(features: Option<impl IntoIterator<Item = impl ToString>>) -> Option<Vec<T>>
