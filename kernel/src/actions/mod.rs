@@ -1091,5 +1091,48 @@ mod tests {
         .unwrap();
 
         assert_eq!(record_batch, expected);
+
+        #[derive(Debug, Schema, IntoEngineData)]
+        struct NestedStruct {
+            a: String,
+            b: SomethingNested,
+        }
+
+        #[derive(Debug, Schema, IntoEngineData)]
+        struct SomethingNested {
+            c: i64,
+            d: i64,
+        }
+
+        // test nested struct (Metadata has nested Format)
+        let nested_struct = NestedStruct {
+            a: "a".to_string(),
+            b: SomethingNested { c: 1, d: 2 },
+        };
+
+        let engine_data = nested_struct.into_engine_data(&engine);
+
+        let record_batch: crate::arrow::array::RecordBatch = engine_data
+            .unwrap()
+            .into_any()
+            .downcast::<ArrowEngineData>()
+            .unwrap()
+            .into();
+
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("appId", ArrowDataType::Utf8, false),
+            Field::new("version", ArrowDataType::Int64, false),
+            Field::new("lastUpdated", ArrowDataType::Int64, true),
+        ]));
+
+        let expected = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(StringArray::from(vec!["app_id"])),
+                Arc::new(Int64Array::from(vec![0_i64])),
+                Arc::new(Int64Array::from(vec![None::<i64>])),
+            ],
+        )
+        .unwrap();
     }
 }
