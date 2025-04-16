@@ -135,8 +135,9 @@ fn gen_schema_fields(data: &Data) -> TokenStream {
     quote! { #(#schema_fields),* }
 }
 
-/// Derive an IntoEngineData trait for a struct that implements ToDataType and has all fields
-/// implement `Into<Scalar>`.
+/// Derive an IntoEngineData trait for a struct that implements ToDataType.
+/// Fields can either implement Into<Scalar> directly or be nested structs that also have this derive.
+/// The macro will collect all leaf scalar values from nested structs to create the engine data.
 #[proc_macro_derive(IntoEngineData)]
 pub fn into_engine_data_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -163,31 +164,106 @@ pub fn into_engine_data_derive(input: proc_macro::TokenStream) -> proc_macro::To
         }
     };
 
-    let field_idents = fields.iter().map(|f| &f.ident);
-    // let field_types = fields.iter().map(|f| &f.ty);
+    // Generate code that processes each field and generates scalar values
+    let process_fields = fields.iter().map(|field| {
+        let field_ident = &field.ident;
+
+        match &field.ty {
+            Type::Path(type_path) => {
+                let type_str = quote! { #type_path }.to_string();
+
+                if is_scalar_type(&type_str) {
+                    // For scalar types, just convert them directly
+                    quote_spanned! { field.span() =>
+                        let value = self.#field_ident.into();
+                        leaf_values.push(value);
+                    }
+                } else {
+                    // For nested structs, recursively collect their fields into flat scalar values
+                    quote_spanned! { field.span() =>
+                        // This will call the collect_scalar_values method on the nested struct
+                        for value in self.#field_ident.collect_scalar_values() {
+                            leaf_values.push(value);
+                        }
+                    }
+                }
+            }
+            _ => Error::new(field.span(), format!("Can't handle type: {:?}", field.ty))
+                .to_compile_error(),
+        }
+    });
 
     let expanded = quote! {
         use crate::actions::schemas::ToSchema as _;
         use crate::EvaluationHandlerExtension as _;
+
         #[automatically_derived]
         impl crate::IntoEngineData for #struct_name
         where
             Self: crate::actions::schemas::ToSchema,
-            // #(#field_types: Into<crate::expressions::Scalar>),*
         {
             fn into_engine_data(
                 self,
                 engine: &dyn crate::Engine)
             -> crate::DeltaResult<Box<dyn crate::EngineData>> {
-                let values = [
-                    #(self.#field_idents.into()),*
-                ];
+                let leaf_values = self.collect_scalar_values();
                 let evaluator = engine.evaluation_handler();
-                let schema = std::sync::Arc::new(Self::to_schema()); // fixme remove arc
-                evaluator.create_one(schema, &values)
+                let schema = std::sync::Arc::new(Self::to_schema());
+                evaluator.create_one(schema, &leaf_values)
+            }
+        }
+
+        #[automatically_derived]
+        impl #struct_name {
+            /// Collects all scalar values from this struct and its nested structs
+            fn collect_scalar_values(self) -> Vec<crate::expressions::Scalar> {
+                let mut leaf_values = Vec::new();
+                #(#process_fields)*
+                leaf_values
             }
         }
     };
 
     proc_macro::TokenStream::from(expanded)
+}
+
+/// Helper function to determine if a type is a scalar type that implements Into<Scalar>
+fn is_scalar_type(type_str: &str) -> bool {
+    // List of primitive types that we know implement Into<Scalar>
+    // Remove whitespace for more reliable matching
+    let cleaned_type = type_str.replace(' ', "");
+
+    let scalar_types = [
+        "String",
+        "i8",
+        "i16",
+        "i32",
+        "i64",
+        "u8",
+        "u16",
+        "u32",
+        "u64",
+        "f32",
+        "f64",
+        "bool",
+        "Option<String>",
+        "Option<i8>",
+        "Option<i16>",
+        "Option<i32>",
+        "Option<i64>",
+        "Option<u8>",
+        "Option<u16>",
+        "Option<u32>",
+        "Option<u64>",
+        "Option<f32>",
+        "Option<f64>",
+        "Option<bool>",
+    ];
+
+    // Handle collections if they're implemented as scalars in the future
+    // if cleaned_type.starts_with("Vec<") || cleaned_type.starts_with("HashMap<") {
+    //     return true;
+    // }
+
+    scalar_types.iter().any(|t| cleaned_type.contains(t))
 }

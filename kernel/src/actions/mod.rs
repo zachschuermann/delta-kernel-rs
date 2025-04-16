@@ -1020,6 +1020,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(test), allow(unused))]
     fn test_into_engine_data() {
         use crate::engine::arrow_expression::ArrowEvaluationHandler;
         use crate::IntoEngineData;
@@ -1070,7 +1071,7 @@ mod tests {
             .unwrap()
             .into();
 
-        use crate::arrow::array::{Int64Array, StringArray};
+        use crate::arrow::array::{Int64Array, StringArray, StructArray};
         use crate::arrow::datatypes::{DataType as ArrowDataType, Field, Schema};
         use crate::arrow::record_batch::RecordBatch;
 
@@ -1111,6 +1112,10 @@ mod tests {
         };
 
         let engine_data = nested_struct.into_engine_data(&engine);
+        assert!(
+            engine_data.is_ok(),
+            "Failed to create engine data for nested struct"
+        );
 
         let record_batch: crate::arrow::array::RecordBatch = engine_data
             .unwrap()
@@ -1119,20 +1124,59 @@ mod tests {
             .unwrap()
             .into();
 
+        // Check that the schema has the expected fields
+        let schema = record_batch.schema();
+        assert_eq!(schema.fields().len(), 2, "Expected 2 fields in schema");
+        assert_eq!(schema.field(0).name(), "a", "First field should be 'a'");
+
+        // Second field should be 'b'
+        let field_b = schema.field(1);
+        assert_eq!(field_b.name(), "b", "Second field should be 'b'");
+
+        // Check that the data has the expected values
+        let a_values = record_batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        assert_eq!(a_values.value(0), "a", "Value of 'a' should be 'a'");
+
+        // Also check if we can access the nested struct's fields in field b
+        // The actual implementation will depend on how structs are represented in the Arrow engine data
+        // For this test, we just want to make sure that the nested struct was processed correctly
+        assert!(
+            record_batch.column(1).is_valid(0),
+            "Field 'b' should contain a valid value"
+        );
+
+        let fields = vec![
+            Field::new("c", ArrowDataType::Int64, false),
+            Field::new("d", ArrowDataType::Int64, false),
+        ];
         let schema = Arc::new(Schema::new(vec![
-            Field::new("appId", ArrowDataType::Utf8, false),
-            Field::new("version", ArrowDataType::Int64, false),
-            Field::new("lastUpdated", ArrowDataType::Int64, true),
+            Field::new("a", ArrowDataType::Utf8, false),
+            Field::new("b", ArrowDataType::Struct(fields.clone().into()), false),
         ]));
 
         let expected = RecordBatch::try_new(
             schema,
             vec![
-                Arc::new(StringArray::from(vec!["app_id"])),
-                Arc::new(Int64Array::from(vec![0_i64])),
-                Arc::new(Int64Array::from(vec![None::<i64>])),
+                Arc::new(StringArray::from(vec!["a"])),
+                Arc::new(
+                    StructArray::try_new(
+                        fields.into(),
+                        vec![
+                            Arc::new(Int64Array::from(vec![1])),
+                            Arc::new(Int64Array::from(vec![2])),
+                        ],
+                        None,
+                    )
+                    .unwrap(),
+                ),
             ],
         )
         .unwrap();
+
+        assert_eq!(record_batch, expected);
     }
 }
