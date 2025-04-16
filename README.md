@@ -77,8 +77,8 @@ versions as we can.
 We allow selecting the version of arrow to use via feature flags. Currently we support the following
 flags:
 
-- `arrow_53`: Use arrow version 53
 - `arrow_54`: Use arrow version 54
+- `arrow_55`: Use arrow version 55
 
 Note that if more than one `arrow_x` feature is enabled, kernel will default to the _lowest_
 specified flag. This also means that if you use `--all-features` you will get the lowest version of

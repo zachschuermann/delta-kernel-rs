@@ -38,7 +38,7 @@ pre-release-hook = [
 
 [dependencies]
 bytes = "1.7"
-chrono = "=0.4.39"
+chrono = "0.4.40"
 fix-hidden-lifetime-bug = "0.2"
 indexmap = "2.5.0"
 itertools = "0.13"
@@ -61,21 +61,19 @@ visibility = "0.1.1"
 # Used in the sync engine
 tempfile = { version = "3", optional = true }
 
-# Arrow supported versions
-## 53
-# Used in default engine
-arrow_53 = { package = "arrow", version = "53", features = ["chrono-tz", "ffi", "json", "prettyprint"], optional = true }
-# Used in default and sync engine
-parquet_53 = { package = "parquet", version = "53", features = ["async", "object_store"] , optional = true }
-######
-## 54
-arrow_54 = { package = "arrow", version = "54", features = ["chrono-tz", "ffi", "json", "prettyprint"], optional = true }
-parquet_54 = { package = "parquet", version = "54", features = ["async", "object_store"] , optional = true }
-######
+# Arrow 54 crates
+arrow_54 = { package = "arrow", version = "=54.3.1", features = ["chrono-tz", "ffi", "json", "prettyprint"], optional = true }
+parquet_54 = { package = "parquet", version = "=54.3.1", features = ["async", "object_store"], optional = true }
+object_store_54 = { package = "object_store", version = "0.11", optional = true }
+hdfs-native-object-store_54 = { package = "hdfs-native-object-store", version = "0.13", optional = true }
+
+# Arrow 55 crates
+arrow_55 = { package = "arrow", version = "55", features = ["chrono-tz", "ffi", "json", "prettyprint"], optional = true }
+parquet_55 = { package = "parquet", version = "55", features = ["async", "object_store"], optional = true }
+object_store_55 = { package = "object_store", version = "0.12", optional = true }
+hdfs-native-object-store_55 = { package = "hdfs-native-object-store", version = "0.14", optional = true }
 
 futures = { version = "0.3", optional = true }
-object_store = { workspace = true, optional = true }
-hdfs-native-object-store = { workspace = true, optional = true }
 # Used for fetching direct urls (like pre-signed urls)
 reqwest = { version = "0.12.8", default-features = false, optional = true }
 strum = { version = "0.26", features = ["derive"] }
@@ -85,27 +83,41 @@ strum = { version = "0.26", features = ["derive"] }
 tokio = { version = "1.40", optional = true, features = ["rt-multi-thread"] }
 
 # Used in integration tests
-hdfs-native = { workspace = true, optional = true }
-walkdir = { workspace = true, optional = true }
+hdfs-native = { version = "0.11", optional = true }
+walkdir = { version = "2.5.0", optional = true }
 
 [features]
 # The default version to be expected
-arrow = ["arrow_53"]
+arrow = ["arrow_55"] # REVERT
 
-arrow_53 = ["dep:arrow_53", "dep:parquet_53"]
-
-arrow_54 = ["dep:arrow_54", "dep:parquet_54"]
+arrow_54 = [
+  "dep:arrow_54",
+  "dep:parquet_54",
+  "dep:object_store_54",
+]
+arrow_55 = [
+  "dep:arrow_55",
+  "dep:parquet_55",
+  "dep:object_store_55",
+]
 
 need_arrow = []
 arrow-conversion = ["need_arrow"]
 arrow-expression = ["need_arrow"]
 
-cloud = [
-  "object_store/aws",
-  "object_store/azure",
-  "object_store/gcp",
-  "object_store/http",
-  "hdfs-native-object-store",
+cloud_54 = [
+  "object_store_54/aws",
+  "object_store_54/azure",
+  "object_store_54/gcp",
+  "object_store_54/http",
+  "hdfs-native-object-store_54",
+]
+cloud_55 = [
+  "object_store_55/aws",
+  "object_store_55/azure",
+  "object_store_55/gcp",
+  "object_store_55/http",
+  "hdfs-native-object-store_55",
 ]
 default = []
 
@@ -116,7 +128,6 @@ default-engine-base = [
   "arrow-expression",
   "futures",
   "need_arrow",
-  "object_store",
   "tokio",
 ]
 
@@ -136,7 +147,7 @@ sync-engine = [
   "tempfile",
 ]
 integration-test = [
-  "hdfs-native-object-store/integration-test",
+  "hdfs-native-object-store_54/integration-test",
   "hdfs-native",
   "walkdir",
 ]
