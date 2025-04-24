@@ -1,11 +1,12 @@
-//! This module exists to help re-export the version of arrow used by default-engine and other
-//! parts of kernel that need arrow
+//! This module exists to help re-export the version of object_store used by default-engine and other
+//! parts of kernel that need object_store
 
+// FIXME: pub(crate)?
 #[cfg(feature = "arrow_54")]
-pub use arrow_54::*;
+pub use object_store_54::*;
 
 #[cfg(all(feature = "arrow_55", not(feature = "arrow_54")))]
-pub use arrow_55::*;
+pub use object_store_55::*;
 
 // if nothing is enabled but we need arrow because of some other feature flag, default to lowest
 // supported version

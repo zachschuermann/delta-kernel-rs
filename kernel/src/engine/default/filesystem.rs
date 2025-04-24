@@ -3,9 +3,10 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::stream::StreamExt;
 use itertools::Itertools;
-use object_store::path::Path;
-use object_store::{DynObjectStore, ObjectStore};
 use url::Url;
+
+use crate::object_store::path::Path;
+use crate::object_store::{DynObjectStore, ObjectStore};
 
 use super::UrlExt;
 use crate::engine::default::executor::TaskExecutor;
@@ -59,7 +60,7 @@ impl<E: TaskExecutor> StorageHandler for ObjectStoreStorageHandler<E> {
         let store = self.inner.clone();
 
         // HACK to check if we're using a LocalFileSystem from ObjectStore. We need this because
-        // local filesystem doesn't return a sorted list by default. Although the `object_store`
+        // local filesystem doesn't return a sorted list by default. Although the `crate::object_store`
         // crate explicitly says it _does not_ return a sorted listing, in practice all the cloud
         // implementations actually do:
         // - AWS:
@@ -176,8 +177,8 @@ mod tests {
     use std::ops::Range;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-    use object_store::memory::InMemory;
-    use object_store::{local::LocalFileSystem, ObjectStore};
+    use crate::object_store::memory::InMemory;
+    use crate::object_store::{local::LocalFileSystem, ObjectStore};
 
     use test_utils::{abs_diff, delta_path_for_version};
 

@@ -89,8 +89,10 @@ pub mod table_properties;
 pub mod transaction;
 
 pub mod arrow;
-pub(crate) mod kernel_predicates;
+pub mod object_store;
 pub mod parquet;
+
+pub(crate) mod kernel_predicates;
 pub(crate) mod utils;
 
 internal_mod!(pub(crate) mod path);
@@ -135,8 +137,13 @@ macro_rules! internal_mod {
 /// Delta table version is 8 byte unsigned int
 pub type Version = u64;
 
+#[cfg(feature = "arrow_54")]
+pub type FileSize = usize;
+#[cfg(all(feature = "arrow_55", not(feature = "arrow_54")))]
+pub type FileSize = u64;
+
 /// A specification for a range of bytes to read from a file location
-pub type FileSlice = (Url, Option<Range<usize>>);
+pub type FileSlice = (Url, Option<Range<FileSize>>); // FIXME RENAME?
 
 /// Data read from a Delta table file and the corresponding scan file information.
 pub type FileDataReadResult = (FileMeta, Box<dyn EngineData>);
@@ -153,7 +160,7 @@ pub struct FileMeta {
     /// The last modified time as milliseconds since unix epoch
     pub last_modified: i64,
     /// The size in bytes of the object
-    pub size: usize,
+    pub size: FileSize,
 }
 
 impl Ord for FileMeta {
@@ -188,14 +195,14 @@ impl TryFrom<DirEntry> for FileMeta {
         Ok(FileMeta {
             location,
             last_modified,
-            size: metadata.len() as usize,
+            size: metadata.len().try_into().expect("FIXME"),
         })
     }
 }
 
 impl FileMeta {
     /// Create a new instance of `FileMeta`
-    pub fn new(location: Url, last_modified: i64, size: usize) -> Self {
+    pub fn new(location: Url, last_modified: i64, size: FileSize) -> Self {
         Self {
             location,
             last_modified,

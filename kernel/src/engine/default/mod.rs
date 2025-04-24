@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use self::storage::parse_url_opts;
-use object_store::DynObjectStore;
+use crate::object_store::DynObjectStore;
 use url::Url;
 
 use self::executor::TaskExecutor;
@@ -67,7 +67,7 @@ impl<E: TaskExecutor> DefaultEngine<E> {
     ///
     /// # Parameters
     ///
-    /// - `object_store`: The object store to use.
+    /// - `crate::object_store`: The object store to use.
     /// - `task_executor`: Used to spawn async IO tasks. See [executor::TaskExecutor].
     pub fn new(object_store: Arc<DynObjectStore>, task_executor: Arc<E>) -> Self {
         Self {
@@ -171,7 +171,7 @@ mod tests {
     use super::executor::tokio::TokioBackgroundExecutor;
     use super::*;
     use crate::engine::tests::test_arrow_engine;
-    use object_store::local::LocalFileSystem;
+    use crate::object_store::local::LocalFileSystem;
 
     #[test]
     fn test_default_engine() {

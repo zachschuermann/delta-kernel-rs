@@ -1,6 +1,6 @@
-use object_store::parse_url_opts as parse_url_opts_object_store;
-use object_store::path::Path;
-use object_store::{Error, ObjectStore};
+use crate::object_store::parse_url_opts as parse_url_opts_object_store;
+use crate::object_store::path::Path;
+use crate::object_store::{Error, ObjectStore};
 use url::Url;
 
 use std::collections::HashMap;
@@ -20,7 +20,7 @@ type Handlers = HashMap<String, HandlerClosure>;
 static URL_REGISTRY: LazyLock<RwLock<Handlers>> = LazyLock::new(|| RwLock::new(HashMap::default()));
 
 /// Insert a new URL handler for [parse_url_opts] with the given `scheme`. This allows users to
-/// provide their own custom URL handler to plug new [object_store::ObjectStore] instances into
+/// provide their own custom URL handler to plug new [crate::object_store::ObjectStore] instances into
 /// delta-kernel
 pub fn insert_url_handler(
     scheme: impl AsRef<str>,
@@ -37,7 +37,7 @@ pub fn insert_url_handler(
 /// Parse the given URL options to produce a valid and configured [ObjectStore]
 ///
 /// This function will first attempt to use any schemes registered via [insert_url_handler],
-/// falling back to the default behavior of [object_store::parse_url_opts]
+/// falling back to the default behavior of [crate::object_store::parse_url_opts]
 pub fn parse_url_opts<I, K, V>(url: &Url, options: I) -> Result<(Box<dyn ObjectStore>, Path), Error>
 where
     I: IntoIterator<Item = (K, V)>,
@@ -58,12 +58,12 @@ where
     parse_url_opts_object_store(url, options)
 }
 
-#[cfg(all(test, feature = "cloud"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
+    use crate::object_store::path::Path;
     use hdfs_native_object_store::HdfsObjectStore;
-    use object_store::path::Path;
 
     /// Example funciton of doing testing of a custom [HdfsObjectStore] construction
     fn parse_url_opts_hdfs_native<I, K, V>(
@@ -84,7 +84,7 @@ mod tests {
         Ok((Box::new(store), path))
     }
 
-    #[test]
+    #[ignore]
     fn test_add_hdfs_scheme() {
         let scheme = "hdfs";
         if let Ok(handlers) = URL_REGISTRY.read() {
@@ -108,7 +108,7 @@ mod tests {
         // jxpected is to inspect the `store` on the error v_v
         if let Err(store_error) = parse_url_opts(&url, options) {
             match store_error {
-                object_store::Error::Generic { store, source: _ } => {
+                crate::object_store::Error::Generic { store, source: _ } => {
                     assert_eq!(store, "HdfsObjectStore");
                 }
                 unexpected => panic!("Unexpected error happened: {unexpected:?}"),

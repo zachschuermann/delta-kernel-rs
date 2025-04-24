@@ -6,14 +6,14 @@ use std::sync::Arc;
 
 use crate::arrow::array::builder::{MapBuilder, MapFieldNames, StringBuilder};
 use crate::arrow::array::{BooleanArray, Int64Array, RecordBatch, StringArray};
+use crate::object_store::path::Path;
+use crate::object_store::DynObjectStore;
 use crate::parquet::arrow::arrow_reader::{
     ArrowReaderMetadata, ArrowReaderOptions, ParquetRecordBatchReaderBuilder,
 };
 use crate::parquet::arrow::arrow_writer::ArrowWriter;
 use crate::parquet::arrow::async_reader::{ParquetObjectReader, ParquetRecordBatchStreamBuilder};
 use futures::StreamExt;
-use object_store::path::Path;
-use object_store::DynObjectStore;
 use uuid::Uuid;
 
 use super::file_stream::{FileOpenFuture, FileOpener, FileStream};
@@ -24,7 +24,7 @@ use crate::engine::default::executor::TaskExecutor;
 use crate::engine::parquet_row_group_skipping::ParquetRowGroupSkipping;
 use crate::schema::SchemaRef;
 use crate::{
-    DeltaResult, EngineData, Error, ExpressionRef, FileDataReadResultIterator, FileMeta,
+    DeltaResult, EngineData, Error, ExpressionRef, FileDataReadResultIterator, FileMeta, FileSize,
     ParquetHandler,
 };
 
@@ -128,7 +128,7 @@ impl<E: TaskExecutor> DefaultParquetHandler<E> {
         writer.write(record_batch)?;
         writer.close()?; // writer must be closed to write footer
 
-        let size = buffer.len();
+        let size: FileSize = buffer.len().try_into().expect("FIXME");
         let name: String = format!("{}.parquet", Uuid::new_v4());
         // fail if path does not end with a trailing slash
         if !path.path().ends_with('/') {
@@ -145,7 +145,11 @@ impl<E: TaskExecutor> DefaultParquetHandler<E> {
 
         let metadata = self.store.head(&Path::from(path.path())).await?;
         let modification_time = metadata.last_modified.timestamp_millis();
-        if size != metadata.size {
+        let metadata_size: FileSize = metadata
+            .size
+            .try_into()
+            .map_err(|_| Error::generic("Failed to convert parquet metadata 'size' to FileSize"))?;
+        if size != metadata_size {
             return Err(Error::generic(format!(
                 "Size mismatch after writing parquet file: expected {}, got {}",
                 size, metadata.size
@@ -188,7 +192,7 @@ impl<E: TaskExecutor> ParquetHandler for DefaultParquetHandler<E> {
         // NB: This means that every file in `FileMeta` _must_ have the same scheme or things will break
         // s3://    -> aws   (ParquetOpener)
         // nothing  -> local (ParquetOpener)
-        // https:// -> assume presigned URL (and fetch without object_store)
+        // https:// -> assume presigned URL (and fetch without crate::object_store)
         //   -> reqwest to get data
         //   -> parse to parquet
         // SAFETY: we did is_empty check above, this is ok.
@@ -255,9 +259,15 @@ impl FileOpener for ParquetOpener {
         let limit = self.limit;
 
         Ok(Box::pin(async move {
-            // TODO avoid IO by converting passed file meta to ObjectMeta
-            let meta = store.head(&path).await?;
-            let mut reader = ParquetObjectReader::new(store, meta);
+            #[cfg(feature = "arrow_54")]
+            let mut reader = {
+                // TODO avoid IO by converting passed file meta to ObjectMeta (no longer an issue
+                // in arrow 55)
+                let meta = store.head(&path).await?;
+                ParquetObjectReader::new(store, meta)
+            };
+            #[cfg(all(feature = "arrow_55", not(feature = "arrow_54")))]
+            let mut reader = ParquetObjectReader::new(store, path);
             let metadata = ArrowReaderMetadata::load_async(&mut reader, Default::default()).await?;
             let parquet_schema = metadata.schema();
             let (indices, requested_ordering) =
@@ -364,7 +374,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use crate::arrow::array::{Array, RecordBatch};
-    use object_store::{local::LocalFileSystem, memory::InMemory, ObjectStore};
+    use crate::object_store::{local::LocalFileSystem, memory::InMemory, ObjectStore};
     use url::Url;
 
     use crate::engine::arrow_data::ArrowEngineData;

@@ -554,7 +554,10 @@ impl Scan {
                     .get_selection_vector(engine.as_ref(), &table_root)?;
                 let meta = FileMeta {
                     last_modified: 0,
-                    size: scan_file.size as usize,
+                    size: scan_file
+                        .size
+                        .try_into()
+                        .expect("size should fit in usize/u64"),
                     location: file_path,
                 };
 

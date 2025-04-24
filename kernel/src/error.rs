@@ -69,14 +69,14 @@ pub enum Error {
     /// An error interacting with the object_store crate
     // We don't use [#from] object_store::Error here as our From impl transforms
     // object_store::Error::NotFound into Self::FileNotFound
-    #[cfg(feature = "object_store")]
+    #[cfg(any(feature = "default-engine-base", feature = "sync-engine"))]
     #[error("Error interacting with object store: {0}")]
-    ObjectStore(object_store::Error),
+    ObjectStore(crate::object_store::Error),
 
     /// An error working with paths from the object_store crate
-    #[cfg(feature = "object_store")]
+    #[cfg(any(feature = "default-engine-base", feature = "sync-engine"))]
     #[error("Object store path error: {0}")]
-    ObjectStorePath(#[from] object_store::path::Error),
+    ObjectStorePath(#[from] crate::object_store::path::Error),
 
     #[cfg(any(feature = "default-engine", feature = "default-engine-rustls"))]
     #[error("Reqwest Error: {0}")]
@@ -319,11 +319,11 @@ impl From<ArrowError> for Error {
     }
 }
 
-#[cfg(feature = "object_store")]
-impl From<object_store::Error> for Error {
-    fn from(value: object_store::Error) -> Self {
+#[cfg(any(feature = "default-engine-base", feature = "sync-engine"))]
+impl From<crate::object_store::Error> for Error {
+    fn from(value: crate::object_store::Error) -> Self {
         match value {
-            object_store::Error::NotFound { path, .. } => Self::file_not_found(path),
+            crate::object_store::Error::NotFound { path, .. } => Self::file_not_found(path),
             err => Self::ObjectStore(err),
         }
     }
