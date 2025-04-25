@@ -9,7 +9,7 @@ use crate::arrow::datatypes::SchemaRef as ArrowSchemaRef;
 use crate::arrow::json::ReaderBuilder;
 use crate::arrow::record_batch::RecordBatch;
 use crate::object_store::path::Path;
-use crate::object_store::{DynObjectStore, GetResultPayload, PutMode};
+use crate::object_store::{self, DynObjectStore, GetResultPayload, PutMode};
 use bytes::{Buf, Bytes};
 use futures::stream::{self, BoxStream};
 use futures::{ready, StreamExt, TryStreamExt};
@@ -152,9 +152,7 @@ impl<E: TaskExecutor> JsonHandler for DefaultJsonHandler<E> {
         self.task_executor
             .block_on(async move { store.put_opts(&path, buffer.into(), put_mode.into()).await })
             .map_err(|e| match e {
-                crate::object_store::Error::AlreadyExists { .. } => {
-                    Error::FileAlreadyExists(path_str)
-                }
+                object_store::Error::AlreadyExists { .. } => Error::FileAlreadyExists(path_str),
                 e => e.into(),
             })?;
         Ok(())
@@ -746,12 +744,11 @@ mod tests {
     ) -> DeltaResult<Vec<serde_json::Value>> {
         let content = store.get(path).await?;
         let file_bytes = content.bytes().await?;
-        let file_string = String::from_utf8(file_bytes.to_vec()).map_err(|e| {
-            crate::object_store::Error::Generic {
+        let file_string =
+            String::from_utf8(file_bytes.to_vec()).map_err(|e| object_store::Error::Generic {
                 store: "memory",
                 source: Box::new(e),
-            }
-        })?;
+            })?;
         let json: Vec<_> = serde_json::Deserializer::from_str(&file_string)
             .into_iter::<serde_json::Value>()
             .flatten()

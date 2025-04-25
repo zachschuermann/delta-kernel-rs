@@ -60,7 +60,7 @@ impl<E: TaskExecutor> StorageHandler for ObjectStoreStorageHandler<E> {
         let store = self.inner.clone();
 
         // HACK to check if we're using a LocalFileSystem from ObjectStore. We need this because
-        // local filesystem doesn't return a sorted list by default. Although the `crate::object_store`
+        // local filesystem doesn't return a sorted list by default. Although the `object_store`
         // crate explicitly says it _does not_ return a sorted listing, in practice all the cloud
         // implementations actually do:
         // - AWS:

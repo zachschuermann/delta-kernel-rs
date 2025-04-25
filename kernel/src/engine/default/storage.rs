@@ -62,7 +62,7 @@ where
 mod tests {
     use super::*;
 
-    use crate::object_store::path::Path;
+    use crate::object_store::{self, path::Path};
     use hdfs_native_object_store::HdfsObjectStore;
 
     /// Example funciton of doing testing of a custom [HdfsObjectStore] construction
@@ -108,7 +108,7 @@ mod tests {
         // expected is to inspect the `store` on the error v_v
         if let Err(store_error) = parse_url_opts(&url, options) {
             match store_error {
-                crate::object_store::Error::Generic { store, source: _ } => {
+                object_store::Error::Generic { store, source: _ } => {
                     assert_eq!(store, "HdfsObjectStore");
                 }
                 unexpected => panic!("Unexpected error happened: {unexpected:?}"),
