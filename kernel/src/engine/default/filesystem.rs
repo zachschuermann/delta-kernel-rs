@@ -154,7 +154,7 @@ impl<E: TaskExecutor> StorageHandler for ObjectStoreStorageHandler<E> {
                             Ok::<bytes::Bytes, Error>(reqwest::get(url).await?.bytes().await?)
                         } else if let Some(rng) = range {
                             // TODO: remove after arrow 54 is dropped
-                            #[cfg(feature = "arrow_54")]
+                            #[cfg(feature = "arrow-54")]
                             let rng = (rng.start.try_into().expect("convert usize to u64"))
                                 ..(rng.end.try_into().expect("convert usize to u64"));
                             Ok(store.get_range(&path, rng).await?)

@@ -266,14 +266,14 @@ impl FileOpener for ParquetOpener {
         let limit = self.limit;
 
         Ok(Box::pin(async move {
-            #[cfg(feature = "arrow_54")]
+            #[cfg(feature = "arrow-54")]
             let mut reader = {
                 // TODO avoid IO by converting passed file meta to ObjectMeta (no longer an issue
                 // in arrow 55)
                 let meta = store.head(&path).await?;
                 ParquetObjectReader::new(store, meta)
             };
-            #[cfg(all(feature = "arrow_55", not(feature = "arrow_54")))]
+            #[cfg(all(feature = "arrow-55", not(feature = "arrow-54")))]
             let mut reader = ParquetObjectReader::new(store, path);
             let metadata = ArrowReaderMetadata::load_async(&mut reader, Default::default()).await?;
             let parquet_schema = metadata.schema();

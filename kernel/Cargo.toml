@@ -104,9 +104,9 @@ internal-api = []
 integration-test = ["hdfs-native-object-store/integration-test"]
 
 # The default versions for arrow/parquet/object_store
-arrow = ["arrow_54"]
-arrow_54 = ["dep:arrow_54", "dep:parquet_54", "dep:object_store_54"]
-arrow_55 = ["dep:arrow_55", "dep:parquet_55", "dep:object_store_55"]
+arrow = ["arrow-54"]
+arrow-54 = ["dep:arrow_54", "dep:parquet_54", "dep:object_store_54"]
+arrow-55 = ["dep:arrow_55", "dep:parquet_55", "dep:object_store_55"]
 need_arrow = []
 arrow-conversion = ["need_arrow"]
 arrow-expression = ["need_arrow"]

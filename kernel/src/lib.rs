@@ -89,7 +89,7 @@ pub mod table_properties;
 pub mod transaction;
 
 mod arrow_compat;
-#[cfg(any(feature = "arrow_54", feature = "arrow_55"))]
+#[cfg(any(feature = "arrow-54", feature = "arrow-55"))]
 pub use arrow_compat::*;
 
 pub(crate) mod kernel_predicates;

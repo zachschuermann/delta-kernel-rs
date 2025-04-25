@@ -16,7 +16,7 @@ release = false
 [dependencies]
 delta_kernel = { path = "../kernel", features = [
   "default-engine",
-  "arrow_54",
+  "arrow-54",
   "internal-api",
 ] }
 futures = "0.3"
