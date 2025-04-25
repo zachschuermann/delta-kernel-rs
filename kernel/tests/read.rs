@@ -14,7 +14,7 @@ use delta_kernel::parquet::file::properties::{EnabledStatistics, WriterPropertie
 use delta_kernel::scan::state::{transform_to_logical, DvInfo, Stats};
 use delta_kernel::scan::Scan;
 use delta_kernel::schema::{DataType, Schema};
-use delta_kernel::{Engine, Error, FileMeta, Table};
+use delta_kernel::{Engine, FileMeta, Table};
 use itertools::Itertools;
 use test_utils::{
     actions_to_string, add_commit, generate_batch, generate_simple_batch, into_record_batch,
