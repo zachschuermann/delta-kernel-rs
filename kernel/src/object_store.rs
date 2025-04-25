@@ -1,7 +1,6 @@
 //! This module exists to help re-export the version of object_store used by default-engine and other
 //! parts of kernel that need object_store
 
-// FIXME: pub(crate)?
 #[cfg(feature = "arrow_54")]
 pub use object_store_54::*;
 

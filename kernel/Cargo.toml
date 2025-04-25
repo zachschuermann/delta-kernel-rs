@@ -101,11 +101,10 @@ default = []
 # internal-api will make everything marked #[internal_api] public
 internal-api = []
 # integration-test turns on a particularly heavy test for hdfs-object-store
-integration-test = []
+integration-test = ["hdfs-native-object-store/integration-test"]
 
 # The default versions for arrow/parquet/object_store
 arrow = ["arrow_54"]
-object_store = []
 arrow_54 = ["dep:arrow_54", "dep:parquet_54", "dep:object_store_54"]
 arrow_55 = ["dep:arrow_55", "dep:parquet_55", "dep:object_store_55"]
 need_arrow = []
@@ -119,7 +118,6 @@ default-engine-base = [
   "arrow-expression",
   "futures",
   "need_arrow",
-  "object_store",
   "tokio",
 ]
 # the default-engine use the reqwest crate with default features which uses native-tls. if you want

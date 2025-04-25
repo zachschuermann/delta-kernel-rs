@@ -67,7 +67,7 @@ impl<E: TaskExecutor> DefaultEngine<E> {
     ///
     /// # Parameters
     ///
-    /// - `crate::object_store`: The object store to use.
+    /// - `object_store`: The object store to use.
     /// - `task_executor`: Used to spawn async IO tasks. See [executor::TaskExecutor].
     pub fn new(object_store: Arc<DynObjectStore>, task_executor: Arc<E>) -> Self {
         Self {

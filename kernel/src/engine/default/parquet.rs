@@ -128,7 +128,12 @@ impl<E: TaskExecutor> DefaultParquetHandler<E> {
         writer.write(record_batch)?;
         writer.close()?; // writer must be closed to write footer
 
-        let size: FileSize = buffer.len().try_into().expect("FIXME");
+        // TODO: remove after dropping arrow 54 support
+        #[allow(clippy::useless_conversion)]
+        let size: FileSize = buffer
+            .len()
+            .try_into()
+            .map_err(|_| Error::generic("Failed to convert buffer size (usize) to FileSize"))?;
         let name: String = format!("{}.parquet", Uuid::new_v4());
         // fail if path does not end with a trailing slash
         if !path.path().ends_with('/') {
@@ -145,6 +150,8 @@ impl<E: TaskExecutor> DefaultParquetHandler<E> {
 
         let metadata = self.store.head(&Path::from(path.path())).await?;
         let modification_time = metadata.last_modified.timestamp_millis();
+        // TODO: remove after dropping arrow 54 support
+        #[allow(clippy::useless_conversion)]
         let metadata_size: FileSize = metadata
             .size
             .try_into()
@@ -192,7 +199,7 @@ impl<E: TaskExecutor> ParquetHandler for DefaultParquetHandler<E> {
         // NB: This means that every file in `FileMeta` _must_ have the same scheme or things will break
         // s3://    -> aws   (ParquetOpener)
         // nothing  -> local (ParquetOpener)
-        // https:// -> assume presigned URL (and fetch without crate::object_store)
+        // https:// -> assume presigned URL (and fetch without object_store)
         //   -> reqwest to get data
         //   -> parse to parquet
         // SAFETY: we did is_empty check above, this is ok.

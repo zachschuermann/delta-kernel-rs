@@ -84,7 +84,7 @@ mod tests {
         Ok((Box::new(store), path))
     }
 
-    #[ignore]
+    #[test]
     fn test_add_hdfs_scheme() {
         let scheme = "hdfs";
         if let Ok(handlers) = URL_REGISTRY.read() {
@@ -105,7 +105,7 @@ mod tests {
         let options: HashMap<String, String> = HashMap::default();
         // Currently constructing an [HdfsObjectStore] won't work if there isn't an actual HDFS
         // to connect to, so the only way to really verify that we got the object store we
-        // jxpected is to inspect the `store` on the error v_v
+        // expected is to inspect the `store` on the error v_v
         if let Err(store_error) = parse_url_opts(&url, options) {
             match store_error {
                 crate::object_store::Error::Generic { store, source: _ } => {

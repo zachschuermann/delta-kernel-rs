@@ -141,9 +141,13 @@ pub type Version = u64;
 pub type FileSize = usize;
 #[cfg(all(feature = "arrow_55", not(feature = "arrow_54")))]
 pub type FileSize = u64;
+#[cfg(feature = "arrow_54")]
+pub type FileIndex = usize;
+#[cfg(all(feature = "arrow_55", not(feature = "arrow_54")))]
+pub type FileIndex = u64;
 
 /// A specification for a range of bytes to read from a file location
-pub type FileSlice = (Url, Option<Range<FileSize>>); // FIXME RENAME?
+pub type FileSlice = (Url, Option<Range<FileIndex>>);
 
 /// Data read from a Delta table file and the corresponding scan file information.
 pub type FileDataReadResult = (FileMeta, Box<dyn EngineData>);
@@ -195,7 +199,10 @@ impl TryFrom<DirEntry> for FileMeta {
         Ok(FileMeta {
             location,
             last_modified,
-            size: metadata.len().try_into().expect("FIXME"),
+            size: metadata
+                .len()
+                .try_into()
+                .map_err(|_| Error::generic("unable to convert DirEntry metadata to FileSize"))?,
         })
     }
 }
