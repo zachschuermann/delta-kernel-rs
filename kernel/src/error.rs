@@ -12,6 +12,8 @@ use crate::Version;
 
 #[cfg(any(feature = "default-engine-base", feature = "sync-engine"))]
 use crate::arrow::error::ArrowError;
+#[cfg(any(feature = "default-engine-base", feature = "sync-engine"))]
+use crate::object_store;
 
 /// A [`std::result::Result`] that has the kernel [`Error`] as the error variant
 pub type DeltaResult<T, E = Error> = std::result::Result<T, E>;
@@ -71,12 +73,12 @@ pub enum Error {
     // object_store::Error::NotFound into Self::FileNotFound
     #[cfg(any(feature = "default-engine-base", feature = "sync-engine"))]
     #[error("Error interacting with object store: {0}")]
-    ObjectStore(crate::object_store::Error),
+    ObjectStore(object_store::Error),
 
     /// An error working with paths from the object_store crate
     #[cfg(any(feature = "default-engine-base", feature = "sync-engine"))]
     #[error("Object store path error: {0}")]
-    ObjectStorePath(#[from] crate::object_store::path::Error),
+    ObjectStorePath(#[from] object_store::path::Error),
 
     #[cfg(any(feature = "default-engine", feature = "default-engine-rustls"))]
     #[error("Reqwest Error: {0}")]
@@ -320,10 +322,10 @@ impl From<ArrowError> for Error {
 }
 
 #[cfg(any(feature = "default-engine-base", feature = "sync-engine"))]
-impl From<crate::object_store::Error> for Error {
-    fn from(value: crate::object_store::Error) -> Self {
+impl From<object_store::Error> for Error {
+    fn from(value: object_store::Error) -> Self {
         match value {
-            crate::object_store::Error::NotFound { path, .. } => Self::file_not_found(path),
+            object_store::Error::NotFound { path, .. } => Self::file_not_found(path),
             err => Self::ObjectStore(err),
         }
     }

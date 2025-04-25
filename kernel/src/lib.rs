@@ -88,9 +88,8 @@ pub mod table_features;
 pub mod table_properties;
 pub mod transaction;
 
-pub mod arrow;
-pub mod object_store;
-pub mod parquet;
+mod arrow_compat;
+pub use arrow_compat::*;
 
 pub(crate) mod kernel_predicates;
 pub(crate) mod utils;
@@ -136,15 +135,6 @@ macro_rules! internal_mod {
 
 /// Delta table version is 8 byte unsigned int
 pub type Version = u64;
-
-#[cfg(feature = "arrow_54")]
-pub type FileSize = usize;
-#[cfg(not(feature = "arrow_54"))]
-pub type FileSize = u64;
-#[cfg(feature = "arrow_54")]
-pub type FileIndex = usize;
-#[cfg(not(feature = "arrow_54"))]
-pub type FileIndex = u64;
 
 /// A specification for a range of bytes to read from a file location
 pub type FileSlice = (Url, Option<Range<FileIndex>>);
