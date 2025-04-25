@@ -138,7 +138,7 @@ macro_rules! internal_mod {
 pub type Version = u64;
 
 /// A specification for a range of bytes to read from a file location
-pub type FileSlice = (Url, Option<Range<FileIndex>>);
+pub type FileSlice = (Url, Option<Range<u64>>);
 
 /// Data read from a Delta table file and the corresponding scan file information.
 pub type FileDataReadResult = (FileMeta, Box<dyn EngineData>);
@@ -155,7 +155,7 @@ pub struct FileMeta {
     /// The last modified time as milliseconds since unix epoch
     pub last_modified: i64,
     /// The size in bytes of the object
-    pub size: FileSize,
+    pub size: u64,
 }
 
 impl Ord for FileMeta {
@@ -195,14 +195,14 @@ impl TryFrom<DirEntry> for FileMeta {
             size: metadata
                 .len()
                 .try_into()
-                .map_err(|_| Error::generic("unable to convert DirEntry metadata to FileSize"))?,
+                .map_err(|_| Error::generic("unable to convert DirEntry metadata to file size"))?,
         })
     }
 }
 
 impl FileMeta {
     /// Create a new instance of `FileMeta`
-    pub fn new(location: Url, last_modified: i64, size: FileSize) -> Self {
+    pub fn new(location: Url, last_modified: i64, size: u64) -> Self {
         Self {
             location,
             last_modified,

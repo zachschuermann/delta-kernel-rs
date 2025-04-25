@@ -14,7 +14,7 @@ use delta_kernel::parquet::file::properties::{EnabledStatistics, WriterPropertie
 use delta_kernel::scan::state::{transform_to_logical, DvInfo, Stats};
 use delta_kernel::scan::Scan;
 use delta_kernel::schema::{DataType, Schema};
-use delta_kernel::{Engine, FileMeta, Table};
+use delta_kernel::{Engine, Error, FileMeta, Table};
 use itertools::Itertools;
 use test_utils::{
     actions_to_string, add_commit, generate_batch, generate_simple_batch, into_record_batch,
@@ -373,7 +373,10 @@ fn read_with_scan_metadata(
             .unwrap();
         let meta = FileMeta {
             last_modified: 0,
-            size: scan_file.size as usize,
+            size: scan_file
+                .size
+                .try_into()
+                .map_err(|_| Error::generic_err("unable to convert i64 to u64"))?,
             location: file_path,
         };
         let read_results = engine

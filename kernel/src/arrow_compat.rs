@@ -4,9 +4,6 @@ mod arrow_compat_shims {
     pub use arrow_54 as arrow;
     pub use object_store_54 as object_store;
     pub use parquet_54 as parquet;
-
-    pub type FileSize = usize;
-    pub type FileIndex = usize;
 }
 
 #[cfg(all(feature = "arrow_55", not(feature = "arrow_54")))]
@@ -14,9 +11,6 @@ mod arrow_compat_shims {
     pub use arrow_55 as arrow;
     pub use object_store_55 as object_store;
     pub use parquet_55 as parquet;
-
-    pub type FileSize = u64;
-    pub type FileIndex = u64;
 }
 
 // if nothing is enabled but we need arrow because of some other feature flag, throw compile-time

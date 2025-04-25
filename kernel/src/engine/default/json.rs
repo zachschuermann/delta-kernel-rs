@@ -531,10 +531,12 @@ mod tests {
         let location = Path::from(url.path());
         let meta = store.head(&location).await.unwrap();
 
+        // TODO: remove after arrow 54 support is dropped
+        #[allow(clippy::useless_conversion)]
         let files = &[FileMeta {
             location: url.clone(),
             last_modified: meta.last_modified.timestamp_millis(),
-            size: meta.size,
+            size: meta.size.try_into().unwrap(),
         }];
 
         let handler = DefaultJsonHandler::new(store, Arc::new(TokioBackgroundExecutor::new()));
@@ -680,10 +682,12 @@ mod tests {
                         let url = Url::parse(&format!("memory:/{}", path)).unwrap();
                         let location = Path::from(path.as_ref());
                         let meta = store.head(&location).await.unwrap();
+                        // TODO: remove after dropping support for arrow 54
+                        #[allow(clippy::useless_conversion)]
                         FileMeta {
                             location: url,
                             last_modified: meta.last_modified.timestamp_millis(),
-                            size: meta.size,
+                            size: meta.size.try_into().unwrap(),
                         }
                     }
                 })

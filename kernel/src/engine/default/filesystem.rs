@@ -90,11 +90,13 @@ impl<E: TaskExecutor> StorageHandler for ObjectStoreStorageHandler<E> {
                     Ok(meta) => {
                         let mut location = url.clone();
                         location.set_path(&format!("/{}", meta.location.as_ref()));
+                        // TODO: remove after dropping support for arrow 54
+                        #[allow(clippy::useless_conversion)]
                         sender
                             .send(Ok(FileMeta {
                                 location,
                                 last_modified: meta.last_modified.timestamp_millis(),
-                                size: meta.size,
+                                size: meta.size.try_into().expect("convert file size to u64"),
                             }))
                             .ok();
                     }
@@ -151,6 +153,10 @@ impl<E: TaskExecutor> StorageHandler for ObjectStoreStorageHandler<E> {
                             // have to annotate type here or rustc can't figure it out
                             Ok::<bytes::Bytes, Error>(reqwest::get(url).await?.bytes().await?)
                         } else if let Some(rng) = range {
+                            // TODO: remove after arrow 54 is dropped
+                            #[cfg(feature = "arrow_54")]
+                            let rng = (rng.start.try_into().expect("convert usize to u64"))
+                                ..(rng.end.try_into().expect("convert usize to u64"));
                             Ok(store.get_range(&path, rng).await?)
                         } else {
                             let result = store.get(&path).await?;
