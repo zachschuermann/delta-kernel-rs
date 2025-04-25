@@ -373,10 +373,7 @@ fn read_with_scan_metadata(
             .unwrap();
         let meta = FileMeta {
             last_modified: 0,
-            size: scan_file
-                .size
-                .try_into()
-                .map_err(|_| Error::generic_err("unable to convert i64 to u64"))?,
+            size: scan_file.size.try_into().unwrap(),
             location: file_path,
         };
         let read_results = engine
