@@ -139,11 +139,11 @@ pub type Version = u64;
 
 #[cfg(feature = "arrow_54")]
 pub type FileSize = usize;
-#[cfg(all(feature = "arrow_55", not(feature = "arrow_54")))]
+#[cfg(not(feature = "arrow_54"))]
 pub type FileSize = u64;
 #[cfg(feature = "arrow_54")]
 pub type FileIndex = usize;
-#[cfg(all(feature = "arrow_55", not(feature = "arrow_54")))]
+#[cfg(not(feature = "arrow_54"))]
 pub type FileIndex = u64;
 
 /// A specification for a range of bytes to read from a file location
@@ -196,6 +196,8 @@ impl TryFrom<DirEntry> for FileMeta {
                 last_modified.as_millis()
             ))
         })?;
+        // TODO: remove after arrow 54 is dropped
+        #[allow(clippy::useless_conversion)]
         Ok(FileMeta {
             location,
             last_modified,
