@@ -107,9 +107,8 @@ integration-test = ["hdfs-native-object-store/integration-test"]
 arrow = ["arrow-55"]
 arrow-54 = ["dep:arrow_54", "dep:parquet_54", "dep:object_store_54"]
 arrow-55 = ["dep:arrow_55", "dep:parquet_55", "dep:object_store_55"]
-need_arrow = []
-arrow-conversion = ["need_arrow"]
-arrow-expression = ["need_arrow"]
+arrow-conversion = ["arrow"]
+arrow-expression = ["arrow"]
 
 # this is an 'internal' feature flag which has all the shared bits from default-engine and
 # default-engine-rustls
@@ -117,7 +116,7 @@ default-engine-base = [
   "arrow-conversion",
   "arrow-expression",
   "futures",
-  "need_arrow",
+  "arrow",
   "tokio",
 ]
 # the default-engine use the reqwest crate with default features which uses native-tls. if you want
@@ -129,7 +128,7 @@ default-engine-rustls = [
   "reqwest/http2",
 ]
 sync-engine = [
-  "need_arrow",
+  "arrow",
   "tempfile",
 ]
 
