@@ -104,7 +104,7 @@ internal-api = []
 integration-test = ["hdfs-native-object-store/integration-test"]
 
 # The default versions for arrow/parquet/object_store
-arrow = ["arrow-54"]
+arrow = ["arrow-55"]
 arrow-54 = ["dep:arrow_54", "dep:parquet_54", "dep:object_store_54"]
 arrow-55 = ["dep:arrow_55", "dep:parquet_55", "dep:object_store_55"]
 need_arrow = []
@@ -140,7 +140,7 @@ rustc_version = "0.4.1"
 delta_kernel = { path = ".", features = ["arrow", "default-engine", "sync-engine"] }
 test_utils = { path = "../test-utils" }
 # Used for testing parse_url_opts extensibility
-hdfs-native-object-store = { version = "0.13.0" }
+hdfs-native-object-store = { version = "0.14.0" }
 hdfs-native = "0.11.1"
 walkdir = { version = "2.5.0" }
 async-trait = "0.1" # only used for our custom SlowGetStore ObjectStore implementation

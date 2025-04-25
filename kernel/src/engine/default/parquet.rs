@@ -411,7 +411,7 @@ mod tests {
         let location = Path::from(url.path());
         let meta = store.head(&location).await.unwrap();
 
-        let reader = ParquetObjectReader::new(store.clone(), meta.clone());
+        let reader = ParquetObjectReader::new(store.clone(), location);
         let physical_schema = ParquetRecordBatchStreamBuilder::new(reader)
             .await
             .unwrap()
@@ -519,9 +519,7 @@ mod tests {
 
         // head the object to get metadata
         let meta = store.head(&Path::from(location.path())).await.unwrap();
-        // TODO: remove after dropping arrow 54 support
-        #[allow(clippy::useless_conversion)]
-        let expected_size = meta.size as u64;
+        let expected_size = meta.size;
 
         // check that last_modified is within 10s of now
         let now: i64 = SystemTime::now()
@@ -538,8 +536,7 @@ mod tests {
 
         // check we can read back
         let path = Path::from(location.path());
-        let meta = store.head(&path).await.unwrap();
-        let reader = ParquetObjectReader::new(store.clone(), meta.clone());
+        let reader = ParquetObjectReader::new(store.clone(), path);
         let physical_schema = ParquetRecordBatchStreamBuilder::new(reader)
             .await
             .unwrap()

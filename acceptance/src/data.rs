@@ -25,7 +25,7 @@ pub async fn read_golden(path: &Path, _version: Option<&str>) -> DeltaResult<Rec
     for meta in files.into_iter() {
         if let Some(ext) = meta.location.extension() {
             if ext == "parquet" {
-                let reader = ParquetObjectReader::new(store.clone(), meta);
+                let reader = ParquetObjectReader::new(store.clone(), meta.location);
                 let builder = ParquetRecordBatchStreamBuilder::new(reader).await?;
                 if schema.is_none() {
                     schema = Some(builder.schema().clone());
