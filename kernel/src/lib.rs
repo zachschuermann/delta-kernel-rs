@@ -136,9 +136,11 @@ macro_rules! internal_mod {
 
 /// Delta table version is 8 byte unsigned int
 pub type Version = u64;
+pub type FileSize = u64;
+pub type FileIndex = u64;
 
 /// A specification for a range of bytes to read from a file location
-pub type FileSlice = (Url, Option<Range<u64>>);
+pub type FileSlice = (Url, Option<Range<FileIndex>>);
 
 /// Data read from a Delta table file and the corresponding scan file information.
 pub type FileDataReadResult = (FileMeta, Box<dyn EngineData>);
@@ -155,7 +157,7 @@ pub struct FileMeta {
     /// The last modified time as milliseconds since unix epoch
     pub last_modified: i64,
     /// The size in bytes of the object
-    pub size: u64,
+    pub size: FileSize,
 }
 
 impl Ord for FileMeta {
