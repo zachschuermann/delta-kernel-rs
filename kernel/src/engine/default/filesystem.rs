@@ -155,6 +155,7 @@ impl<E: TaskExecutor> StorageHandler for ObjectStoreStorageHandler<E> {
                         } else if let Some(rng) = range {
                             // TODO: remove after arrow 54 is dropped
                             #[cfg(feature = "arrow-54")]
+                            #[allow(clippy::useless_conversion)]
                             let rng = (rng
                                 .start
                                 .try_into()
