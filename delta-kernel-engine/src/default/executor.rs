@@ -7,7 +7,7 @@
 //! and multi-threaded executor based on Tokio.
 use futures::{future::BoxFuture, Future};
 
-use crate::DeltaResult;
+use delta_kernel::DeltaResult;
 
 /// An executor that can be used to run async tasks. This is used by IO functions
 /// within the `DefaultEngine`.
@@ -36,7 +36,7 @@ pub trait TaskExecutor: Send + Sync + 'static {
         R: Send + 'static;
 }
 
-#[cfg(any(feature = "tokio", test))]
+// #[cfg(any(feature = "tokio", test))]
 pub mod tokio {
     use super::TaskExecutor;
     use futures::TryFutureExt;
@@ -44,7 +44,7 @@ pub mod tokio {
     use std::sync::mpsc::channel;
     use tokio::runtime::RuntimeFlavor;
 
-    use crate::DeltaResult;
+    use delta_kernel::DeltaResult;
 
     /// A [`TaskExecutor`] that uses the tokio single-threaded runtime in a
     /// background thread to service tasks.
@@ -140,7 +140,7 @@ pub mod tokio {
             T: FnOnce() -> R + Send + 'static,
             R: Send + 'static,
         {
-            Box::pin(tokio::task::spawn_blocking(task).map_err(crate::Error::join_failure))
+            Box::pin(tokio::task::spawn_blocking(task).map_err(delta_kernel::Error::join_failure))
         }
     }
 
@@ -203,7 +203,7 @@ pub mod tokio {
             T: FnOnce() -> R + Send + 'static,
             R: Send + 'static,
         {
-            Box::pin(tokio::task::spawn_blocking(task).map_err(crate::Error::join_failure))
+            Box::pin(tokio::task::spawn_blocking(task).map_err(delta_kernel::Error::join_failure))
         }
     }
 

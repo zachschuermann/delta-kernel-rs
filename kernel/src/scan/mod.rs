@@ -834,13 +834,13 @@ pub(crate) mod test_utils {
     }
 }
 
-#[cfg(all(test, feature = "sync-engine"))]
+#[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
-    use crate::engine::sync::SyncEngine;
     use crate::expressions::{column_expr, Expression as Expr};
     use crate::schema::{ColumnMetadataKey, PrimitiveType};
+    use crate::test_engine::SyncEngine;
     use crate::Table;
 
     use super::*;

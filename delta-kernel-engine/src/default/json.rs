@@ -10,6 +10,13 @@ use crate::arrow::json::ReaderBuilder;
 use crate::arrow::record_batch::RecordBatch;
 use crate::object_store::path::Path;
 use crate::object_store::{self, DynObjectStore, GetResultPayload, PutMode};
+
+use delta_kernel::schema::SchemaRef;
+use delta_kernel::{
+    DeltaResult, EngineData, Error, ExpressionRef, FileDataReadResultIterator, FileMeta,
+    JsonHandler,
+};
+
 use bytes::{Buf, Bytes};
 use futures::stream::{self, BoxStream};
 use futures::{ready, StreamExt, TryStreamExt};
@@ -17,14 +24,10 @@ use tracing::warn;
 use url::Url;
 
 use super::executor::TaskExecutor;
-use crate::engine::arrow_data::ArrowEngineData;
-use crate::engine::arrow_utils::parse_json as arrow_parse_json;
-use crate::engine::arrow_utils::to_json_bytes;
-use crate::schema::SchemaRef;
-use crate::{
-    DeltaResult, EngineData, Error, ExpressionRef, FileDataReadResultIterator, FileMeta,
-    JsonHandler,
-};
+use crate::arrow_data::ArrowEngineData;
+use crate::arrow_utils::parse_json as arrow_parse_json;
+use crate::arrow_utils::to_json_bytes;
+use crate::EngineError;
 
 const DEFAULT_BUFFER_SIZE: usize = 1000;
 const DEFAULT_BATCH_SIZE: usize = 1000;
@@ -152,7 +155,9 @@ impl<E: TaskExecutor> JsonHandler for DefaultJsonHandler<E> {
         self.task_executor
             .block_on(async move { store.put_opts(&path, buffer.into(), put_mode.into()).await })
             .map_err(|e| match e {
-                object_store::Error::AlreadyExists { .. } => Error::FileAlreadyExists(path_str),
+                object_store::Error::AlreadyExists { .. } => {
+                    EngineError::FileAlreadyExists(path_str)
+                }
                 e => e.into(),
             })?;
         Ok(())

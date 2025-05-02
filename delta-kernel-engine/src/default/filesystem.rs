@@ -9,8 +9,8 @@ use crate::object_store::path::Path;
 use crate::object_store::{DynObjectStore, ObjectStore};
 
 use super::UrlExt;
-use crate::engine::default::executor::TaskExecutor;
-use crate::{DeltaResult, Error, FileMeta, FileSlice, StorageHandler};
+use crate::default::executor::TaskExecutor;
+use delta_kernel::{DeltaResult, Error, FileMeta, FileSlice, StorageHandler};
 
 #[derive(Debug)]
 pub struct ObjectStoreStorageHandler<E: TaskExecutor> {

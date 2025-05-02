@@ -1,4 +1,6 @@
 //! Expression handling based on arrow-rs compute kernels.
+use std::sync::Arc;
+
 use crate::arrow::array::types::*;
 use crate::arrow::array::{
     Array, ArrayRef, AsArray, BooleanArray, Datum, RecordBatch, StructArray,
@@ -11,15 +13,16 @@ use crate::arrow::datatypes::{
     DataType as ArrowDataType, Field as ArrowField, IntervalUnit, TimeUnit,
 };
 use crate::arrow::error::ArrowError;
-use crate::engine::arrow_utils::prim_array_cmp;
-use crate::error::{DeltaResult, Error};
-use crate::expressions::{
+
+use crate::arrow_utils::prim_array_cmp;
+
+use delta_kernel::error::{DeltaResult, Error};
+use delta_kernel::expressions::{
     BinaryExpression, BinaryOperator, Expression, JunctionExpression, JunctionOperator, Scalar,
     UnaryExpression, UnaryOperator,
 };
-use crate::schema::DataType;
+use delta_kernel::schema::DataType;
 use itertools::Itertools;
-use std::sync::Arc;
 
 fn downcast_to_bool(arr: &dyn Array) -> DeltaResult<&BooleanArray> {
     arr.as_any()

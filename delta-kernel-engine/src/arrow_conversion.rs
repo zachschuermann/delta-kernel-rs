@@ -9,8 +9,8 @@ use crate::arrow::datatypes::{
 use crate::arrow::error::ArrowError;
 use itertools::Itertools;
 
-use crate::error::Error;
-use crate::schema::{
+use crate::error::EngineError;
+use delta_kernel::schema::{
     ArrayType, DataType, MapType, MetadataValue, PrimitiveType, StructField, StructType,
 };
 

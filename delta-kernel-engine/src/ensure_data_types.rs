@@ -6,14 +6,14 @@ use std::{
 };
 
 use crate::arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField};
+
 use itertools::Itertools;
 
-use crate::{
-    engine::arrow_utils::make_arrow_error,
-    schema::{DataType, MetadataValue, StructField},
-    utils::require,
-    DeltaResult, Error,
-};
+use crate::arrow_utils::make_arrow_error;
+
+use delta_kernel::schema::{DataType, MetadataValue, StructField};
+use delta_kernel::utils::require;
+use delta_kernel::{DeltaResult, Error};
 
 /// Ensure a kernel data type matches an arrow data type. This only ensures that the actual "type"
 /// is the same, but does so recursively into structs, and ensures lists and maps have the correct

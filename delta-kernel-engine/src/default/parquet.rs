@@ -13,17 +13,20 @@ use crate::parquet::arrow::arrow_reader::{
 };
 use crate::parquet::arrow::arrow_writer::ArrowWriter;
 use crate::parquet::arrow::async_reader::{ParquetObjectReader, ParquetRecordBatchStreamBuilder};
+
 use futures::StreamExt;
 use uuid::Uuid;
 
 use super::file_stream::{FileOpenFuture, FileOpener, FileStream};
 use super::UrlExt;
-use crate::engine::arrow_data::ArrowEngineData;
-use crate::engine::arrow_utils::{fixup_parquet_read, generate_mask, get_requested_indices};
-use crate::engine::default::executor::TaskExecutor;
-use crate::engine::parquet_row_group_skipping::ParquetRowGroupSkipping;
-use crate::schema::SchemaRef;
-use crate::{
+use crate::arrow_data::ArrowEngineData;
+use crate::arrow_utils::{fixup_parquet_read, generate_mask, get_requested_indices};
+use crate::default::executor::TaskExecutor;
+use crate::parquet_row_group_skipping::ParquetRowGroupSkipping;
+
+use delta_kernel::schema::SchemaRef;
+use delta_kernel::transaction;
+use delta_kernel::{
     DeltaResult, EngineData, Error, ExpressionRef, FileDataReadResultIterator, FileMeta,
     ParquetHandler,
 };
@@ -61,7 +64,7 @@ impl DataFileMetadata {
                     size,
                 },
         } = self;
-        let write_metadata_schema = crate::transaction::get_write_metadata_schema();
+        let write_metadata_schema = transaction::get_write_metadata_schema();
 
         // create the record batch of the write metadata
         let path = Arc::new(StringArray::from(vec![location.to_string()]));
@@ -171,7 +174,7 @@ impl<E: TaskExecutor> DefaultParquetHandler<E> {
     /// metadata as an EngineData batch which matches the [write metadata] schema (where `<uuid>` is
     /// a generated UUIDv4).
     ///
-    /// [write metadata]: crate::transaction::get_write_metadata_schema
+    /// [write metadata]: delta_kernel::transaction::get_write_metadata_schema
     pub async fn write_parquet_file(
         &self,
         path: &url::Url,
@@ -453,7 +456,7 @@ mod tests {
         let actual = ArrowEngineData::try_from_engine_data(actual).unwrap();
 
         let schema = Arc::new(
-            crate::transaction::get_write_metadata_schema()
+            transaction::get_write_metadata_schema()
                 .as_ref()
                 .try_into()
                 .unwrap(),

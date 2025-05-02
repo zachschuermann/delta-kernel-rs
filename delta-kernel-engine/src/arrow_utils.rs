@@ -4,13 +4,8 @@ use std::collections::HashSet;
 use std::io::{BufRead, BufReader};
 use std::sync::Arc;
 
-use crate::engine::ensure_data_types::DataTypeCompat;
-use crate::{
-    engine::arrow_data::ArrowEngineData,
-    schema::{DataType, Schema, SchemaRef, StructField, StructType},
-    utils::require,
-    DeltaResult, EngineData, Error,
-};
+use itertools::Itertools;
+use tracing::debug;
 
 use crate::arrow::array::{
     cast::AsArray, make_array, new_null_array, Array as ArrowArray, GenericListArray,
@@ -24,8 +19,15 @@ use crate::arrow::datatypes::{
 };
 use crate::arrow::json::{LineDelimitedWriter, ReaderBuilder};
 use crate::parquet::{arrow::ProjectionMask, schema::types::SchemaDescriptor};
-use itertools::Itertools;
-use tracing::debug;
+
+use delta_kernel::{
+    schema::{DataType, Schema, SchemaRef, StructField, StructType},
+    utils::require,
+    DeltaResult, EngineData, Error,
+};
+
+use crate::arrow_data::ArrowEngineData;
+use crate::ensure_data_types::DataTypeCompat;
 
 macro_rules! prim_array_cmp {
     ( $left_arr: ident, $right_arr: ident, $(($data_ty: pat, $prim_ty: ty)),+ ) => {

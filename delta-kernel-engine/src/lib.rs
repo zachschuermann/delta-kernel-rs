@@ -1,32 +1,21 @@
-//! Provides engine implementation that implement the required traits. These engines can optionally
-//! be built into the kernel by setting the `default-engine` or `sync-engine` feature flags. See the
-//! related modules for more information.
+//! Arrow-based engine implementation.
 
-#[cfg(feature = "arrow-conversion")]
-pub(crate) mod arrow_conversion;
-
-#[cfg(all(
-    feature = "arrow-expression",
-    any(feature = "default-engine-base", feature = "sync-engine")
-))]
-pub mod arrow_expression;
-#[cfg(feature = "arrow-expression")]
-pub(crate) mod arrow_utils;
-
-#[cfg(feature = "default-engine-base")]
-pub mod default;
-
-#[cfg(feature = "sync-engine")]
-pub mod sync;
-
-#[cfg(any(feature = "default-engine-base", feature = "sync-engine"))]
 pub mod arrow_data;
-#[cfg(any(feature = "default-engine-base", feature = "sync-engine"))]
-pub(crate) mod arrow_get_data;
-#[cfg(any(feature = "default-engine-base", feature = "sync-engine"))]
-pub(crate) mod ensure_data_types;
-#[cfg(any(feature = "default-engine-base", feature = "sync-engine"))]
+pub mod arrow_expression;
+pub mod default;
 pub mod parquet_row_group_skipping;
+
+// we re-export the arrow/parquet/object_store
+mod arrow_compat;
+pub use arrow_compat::*;
+
+pub(crate) mod arrow_conversion;
+pub(crate) mod arrow_get_data;
+pub(crate) mod arrow_utils;
+pub(crate) mod ensure_data_types;
+pub(crate) mod error;
+
+pub use error::EngineError;
 
 #[cfg(test)]
 mod tests {

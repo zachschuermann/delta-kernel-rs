@@ -13,12 +13,12 @@ use crate::arrow::datatypes::{
 };
 
 use super::arrow_conversion::LIST_ARRAY_ROOT;
-use crate::engine::arrow_data::ArrowEngineData;
-use crate::error::{DeltaResult, Error};
-use crate::expressions::{Expression, Scalar};
-use crate::schema::{DataType, PrimitiveType, SchemaRef};
-use crate::{EngineData, EvaluationHandler, ExpressionEvaluator};
+use crate::arrow_data::ArrowEngineData;
 
+use delta_kernel::error::{DeltaResult, Error};
+use delta_kernel::expressions::{Expression, Scalar};
+use delta_kernel::schema::{DataType, PrimitiveType, SchemaRef};
+use delta_kernel::{EngineData, EvaluationHandler, ExpressionEvaluator};
 use itertools::Itertools;
 use tracing::debug;
 

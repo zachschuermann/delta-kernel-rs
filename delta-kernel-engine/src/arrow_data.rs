@@ -1,6 +1,6 @@
-use crate::engine_data::{EngineData, EngineList, EngineMap, GetData, RowVisitor};
-use crate::schema::{ColumnName, DataType};
-use crate::{DeltaResult, Error};
+use delta_kernel::engine_data::{EngineData, EngineList, EngineMap, GetData, RowVisitor};
+use delta_kernel::schema::{ColumnName, DataType};
+use delta_kernel::{DeltaResult, Error};
 
 use crate::arrow::array::cast::AsArray;
 use crate::arrow::array::types::{Int32Type, Int64Type};
@@ -12,7 +12,7 @@ use tracing::debug;
 
 use std::collections::{HashMap, HashSet};
 
-pub use crate::engine::arrow_utils::fix_nested_null_masks;
+pub use crate::arrow_utils::fix_nested_null_masks;
 
 /// ArrowEngineData holds an Arrow `RecordBatch`, implements `EngineData` so the kernel can extract from it.
 ///
@@ -67,60 +67,60 @@ impl From<Box<ArrowEngineData>> for RecordBatch {
     }
 }
 
-impl<OffsetSize> EngineList for GenericListArray<OffsetSize>
-where
-    OffsetSize: OffsetSizeTrait,
-{
-    fn len(&self, row_index: usize) -> usize {
-        self.value(row_index).len()
-    }
-
-    fn get(&self, row_index: usize, index: usize) -> String {
-        let arry = self.value(row_index);
-        let sarry = arry.as_string::<i32>();
-        sarry.value(index).to_string()
-    }
-
-    fn materialize(&self, row_index: usize) -> Vec<String> {
-        let mut result = vec![];
-        for i in 0..EngineList::len(self, row_index) {
-            result.push(self.get(row_index, i));
-        }
-        result
-    }
-}
-
-impl EngineMap for MapArray {
-    fn get<'a>(&'a self, row_index: usize, key: &str) -> Option<&'a str> {
-        let offsets = self.offsets();
-        let start_offset = offsets[row_index] as usize;
-        let count = offsets[row_index + 1] as usize - start_offset;
-        let keys = self.keys().as_string::<i32>();
-        for (idx, map_key) in keys.iter().enumerate().skip(start_offset).take(count) {
-            if let Some(map_key) = map_key {
-                if key == map_key {
-                    // found the item
-                    let vals = self.values().as_string::<i32>();
-                    return Some(vals.value(idx));
-                }
-            }
-        }
-        None
-    }
-
-    fn materialize(&self, row_index: usize) -> HashMap<String, String> {
-        let mut ret = HashMap::new();
-        let map_val = self.value(row_index);
-        let keys = map_val.column(0).as_string::<i32>();
-        let values = map_val.column(1).as_string::<i32>();
-        for (key, value) in keys.iter().zip(values.iter()) {
-            if let (Some(key), Some(value)) = (key, value) {
-                ret.insert(key.into(), value.into());
-            }
-        }
-        ret
-    }
-}
+// impl<OffsetSize> EngineList for GenericListArray<OffsetSize>
+// where
+//     OffsetSize: OffsetSizeTrait,
+// {
+//     fn len(&self, row_index: usize) -> usize {
+//         self.value(row_index).len()
+//     }
+//
+//     fn get(&self, row_index: usize, index: usize) -> String {
+//         let arry = self.value(row_index);
+//         let sarry = arry.as_string::<i32>();
+//         sarry.value(index).to_string()
+//     }
+//
+//     fn materialize(&self, row_index: usize) -> Vec<String> {
+//         let mut result = vec![];
+//         for i in 0..EngineList::len(self, row_index) {
+//             result.push(self.get(row_index, i));
+//         }
+//         result
+//     }
+// }
+//
+// impl EngineMap for MapArray {
+//     fn get<'a>(&'a self, row_index: usize, key: &str) -> Option<&'a str> {
+//         let offsets = self.offsets();
+//         let start_offset = offsets[row_index] as usize;
+//         let count = offsets[row_index + 1] as usize - start_offset;
+//         let keys = self.keys().as_string::<i32>();
+//         for (idx, map_key) in keys.iter().enumerate().skip(start_offset).take(count) {
+//             if let Some(map_key) = map_key {
+//                 if key == map_key {
+//                     // found the item
+//                     let vals = self.values().as_string::<i32>();
+//                     return Some(vals.value(idx));
+//                 }
+//             }
+//         }
+//         None
+//     }
+//
+//     fn materialize(&self, row_index: usize) -> HashMap<String, String> {
+//         let mut ret = HashMap::new();
+//         let map_val = self.value(row_index);
+//         let keys = map_val.column(0).as_string::<i32>();
+//         let values = map_val.column(1).as_string::<i32>();
+//         for (key, value) in keys.iter().zip(values.iter()) {
+//             if let (Some(key), Some(value)) = (key, value) {
+//                 ret.insert(key.into(), value.into());
+//             }
+//         }
+//         ret
+//     }
+// }
 
 /// Helper trait that provides uniform access to columns and fields, so that our row visitor can use
 /// the same code to drill into a `RecordBatch` (initial case) or `StructArray` (nested case).
@@ -294,12 +294,12 @@ impl ArrowEngineData {
 
 #[cfg(test)]
 mod tests {
-    use crate::actions::{get_log_schema, Metadata, Protocol};
     use crate::arrow::array::StringArray;
-    use crate::engine::sync::SyncEngine;
-    use crate::table_features::{ReaderFeature, WriterFeature};
-    use crate::utils::test_utils::string_array_to_engine_data;
-    use crate::{DeltaResult, Engine as _};
+
+    use delta_kernel::actions::{get_log_schema, Metadata, Protocol};
+    use delta_kernel::table_features::{ReaderFeature, WriterFeature};
+    use delta_kernel::utils::test_utils::string_array_to_engine_data;
+    use delta_kernel::{DeltaResult, Engine as _};
 
     #[test]
     fn test_md_extract() -> DeltaResult<()> {

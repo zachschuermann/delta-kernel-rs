@@ -11,9 +11,10 @@ use crate::arrow::datatypes::Schema as ArrowSchema;
 use crate::arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField};
 
 use super::super::arrow_utils::make_arrow_error;
-use crate::engine::ensure_data_types::ensure_data_types;
-use crate::error::{DeltaResult, Error};
-use crate::schema::{ArrayType, DataType, MapType, Schema, StructField};
+use crate::ensure_data_types::ensure_data_types;
+
+use delta_kernel::error::{DeltaResult, Error};
+use delta_kernel::schema::{ArrayType, DataType, MapType, Schema, StructField};
 
 // Apply a schema to an array. The array _must_ be a `StructArray`. Returns a `RecordBatch where the
 // names of fields, nullable, and metadata in the struct have been transformed to match those in
