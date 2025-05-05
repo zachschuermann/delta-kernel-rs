@@ -9,13 +9,23 @@ pub mod parquet_row_group_skipping;
 mod arrow_compat;
 pub use arrow_compat::*;
 
-pub(crate) mod arrow_conversion;
-pub(crate) mod arrow_get_data;
 pub(crate) mod arrow_utils;
 pub(crate) mod ensure_data_types;
 pub(crate) mod error;
 
 pub use error::EngineError;
+
+/// FIXME duplicated from utils in kernel
+/// convenient way to return an error if a condition isn't true
+macro_rules! require {
+    ( $cond:expr, $err:expr ) => {
+        if !($cond) {
+            return Err($err);
+        }
+    };
+}
+
+pub(crate) use require;
 
 #[cfg(test)]
 mod tests {

@@ -57,7 +57,7 @@ impl<'a> RowGroupFilter<'a> {
 
     /// Applies a filtering predicate to a row group. Return value false means to skip it.
     fn apply(row_group: &'a RowGroupMetaData, predicate: &Expression) -> bool {
-        use delta_kernel::kernel_predicates::KernelPredicateEvaluator as _;
+        // use delta_kernel::kernel_predicates::KernelPredicateEvaluator as _;
         RowGroupFilter::new(row_group, predicate).eval_sql_where(predicate) != Some(false)
     }
 

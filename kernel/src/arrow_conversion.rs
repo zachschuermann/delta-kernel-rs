@@ -2,15 +2,25 @@
 
 use std::sync::Arc;
 
-use crate::arrow::datatypes::{
+#[cfg(feature = "arrow-conversion-55")]
+use arrow_array_55 as arrow_array;
+#[cfg(feature = "arrow-conversion-55")]
+use arrow_schema_55 as arrow_schema;
+
+#[cfg(not(feature = "arrow-conversion-55"))]
+use arrow_array_54 as arrow_array;
+#[cfg(not(feature = "arrow-conversion-55"))]
+use arrow_schema_54 as arrow_schema;
+
+use arrow_schema::ArrowError;
+use arrow_schema::{
     DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema,
     SchemaRef as ArrowSchemaRef, TimeUnit,
 };
-use crate::arrow::error::ArrowError;
 use itertools::Itertools;
 
-use crate::error::EngineError;
-use delta_kernel::schema::{
+use crate::error::Error;
+use crate::schema::{
     ArrayType, DataType, MapType, MetadataValue, PrimitiveType, StructField, StructType,
 };
 
@@ -273,5 +283,144 @@ mod tests {
             &"hello world".to_owned()
         );
         Ok(())
+    }
+}
+
+////////////////////////////////////
+
+use std::collections::HashMap;
+
+use arrow_array::cast::AsArray;
+use arrow_array::{
+    types::{GenericStringType, Int32Type, Int64Type},
+    Array, BooleanArray, GenericByteArray, GenericListArray, MapArray, OffsetSizeTrait,
+    PrimitiveArray,
+};
+
+use crate::engine_data::{EngineList, EngineMap};
+use crate::engine_data::{GetData, ListItem, MapItem};
+use crate::DeltaResult;
+
+// actual impls (todo: could macro these)
+
+impl GetData<'_> for BooleanArray {
+    fn get_bool(&self, row_index: usize, _field_name: &str) -> DeltaResult<Option<bool>> {
+        if self.is_valid(row_index) {
+            Ok(Some(self.value(row_index)))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl GetData<'_> for PrimitiveArray<Int32Type> {
+    fn get_int(&self, row_index: usize, _field_name: &str) -> DeltaResult<Option<i32>> {
+        if self.is_valid(row_index) {
+            Ok(Some(self.value(row_index)))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl GetData<'_> for PrimitiveArray<Int64Type> {
+    fn get_long(&self, row_index: usize, _field_name: &str) -> DeltaResult<Option<i64>> {
+        if self.is_valid(row_index) {
+            Ok(Some(self.value(row_index)))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl<'a> GetData<'a> for GenericByteArray<GenericStringType<i32>> {
+    fn get_str(&'a self, row_index: usize, _field_name: &str) -> DeltaResult<Option<&'a str>> {
+        if self.is_valid(row_index) {
+            Ok(Some(self.value(row_index)))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl<'a, OffsetSize> GetData<'a> for GenericListArray<OffsetSize>
+where
+    OffsetSize: OffsetSizeTrait,
+{
+    fn get_list(
+        &'a self,
+        row_index: usize,
+        _field_name: &str,
+    ) -> DeltaResult<Option<ListItem<'a>>> {
+        if self.is_valid(row_index) {
+            Ok(Some(ListItem::new(self, row_index)))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl<'a> GetData<'a> for MapArray {
+    fn get_map(&'a self, row_index: usize, _field_name: &str) -> DeltaResult<Option<MapItem<'a>>> {
+        if self.is_valid(row_index) {
+            Ok(Some(MapItem::new(self, row_index)))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl<OffsetSize> EngineList for GenericListArray<OffsetSize>
+where
+    OffsetSize: OffsetSizeTrait,
+{
+    fn len(&self, row_index: usize) -> usize {
+        self.value(row_index).len()
+    }
+
+    fn get(&self, row_index: usize, index: usize) -> String {
+        let arry = self.value(row_index);
+        let sarry = arry.as_string::<i32>();
+        sarry.value(index).to_string()
+    }
+
+    fn materialize(&self, row_index: usize) -> Vec<String> {
+        let mut result = vec![];
+        for i in 0..EngineList::len(self, row_index) {
+            result.push(self.get(row_index, i));
+        }
+        result
+    }
+}
+
+impl EngineMap for MapArray {
+    fn get<'a>(&'a self, row_index: usize, key: &str) -> Option<&'a str> {
+        let offsets = self.offsets();
+        let start_offset = offsets[row_index] as usize;
+        let count = offsets[row_index + 1] as usize - start_offset;
+        let keys = self.keys().as_string::<i32>();
+        for (idx, map_key) in keys.iter().enumerate().skip(start_offset).take(count) {
+            if let Some(map_key) = map_key {
+                if key == map_key {
+                    // found the item
+                    let vals = self.values().as_string::<i32>();
+                    return Some(vals.value(idx));
+                }
+            }
+        }
+        None
+    }
+
+    fn materialize(&self, row_index: usize) -> HashMap<String, String> {
+        let mut ret = HashMap::new();
+        let map_val = self.value(row_index);
+        let keys = map_val.column(0).as_string::<i32>();
+        let values = map_val.column(1).as_string::<i32>();
+        for (key, value) in keys.iter().zip(values.iter()) {
+            if let (Some(key), Some(value)) = (key, value) {
+                ret.insert(key.into(), value.into());
+            }
+        }
+        ret
     }
 }

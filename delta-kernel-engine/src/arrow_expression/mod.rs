@@ -12,7 +12,6 @@ use crate::arrow::datatypes::{
     DataType as ArrowDataType, Field as ArrowField, Fields, Schema as ArrowSchema,
 };
 
-use super::arrow_conversion::LIST_ARRAY_ROOT;
 use crate::arrow_data::ArrowEngineData;
 
 use delta_kernel::error::{DeltaResult, Error};
@@ -33,93 +32,90 @@ mod tests;
 
 // TODO leverage scalars / Datum
 
-impl Scalar {
-    /// Convert scalar to arrow array.
-    pub fn to_array(&self, num_rows: usize) -> DeltaResult<ArrayRef> {
-        use Scalar::*;
-        let arr: ArrayRef = match self {
-            Integer(val) => Arc::new(Int32Array::from_value(*val, num_rows)),
-            Long(val) => Arc::new(Int64Array::from_value(*val, num_rows)),
-            Short(val) => Arc::new(Int16Array::from_value(*val, num_rows)),
-            Byte(val) => Arc::new(Int8Array::from_value(*val, num_rows)),
-            Float(val) => Arc::new(Float32Array::from_value(*val, num_rows)),
-            Double(val) => Arc::new(Float64Array::from_value(*val, num_rows)),
-            String(val) => Arc::new(StringArray::from(vec![val.clone(); num_rows])),
-            Boolean(val) => Arc::new(BooleanArray::from(vec![*val; num_rows])),
-            Timestamp(val) => {
-                Arc::new(TimestampMicrosecondArray::from_value(*val, num_rows).with_timezone("UTC"))
-            }
-            TimestampNtz(val) => Arc::new(TimestampMicrosecondArray::from_value(*val, num_rows)),
-            Date(val) => Arc::new(Date32Array::from_value(*val, num_rows)),
-            Binary(val) => Arc::new(BinaryArray::from(vec![val.as_slice(); num_rows])),
-            Decimal(val) => Arc::new(
-                Decimal128Array::from_value(val.bits(), num_rows)
-                    .with_precision_and_scale(val.precision(), val.scale() as i8)?, // 0..=38
-            ),
-            Struct(data) => {
-                let arrays = data
-                    .values()
-                    .iter()
-                    .map(|val| val.to_array(num_rows))
-                    .try_collect()?;
-                let fields: Fields = data
-                    .fields()
-                    .iter()
-                    .map(ArrowField::try_from)
-                    .try_collect()?;
-                Arc::new(StructArray::try_new(fields, arrays, None)?)
-            }
-            Array(data) => {
-                #[allow(deprecated)]
-                let values = data.array_elements();
-                let vecs: Vec<_> = values.iter().map(|v| v.to_array(num_rows)).try_collect()?;
-                let values: Vec<_> = vecs.iter().map(|x| x.as_ref()).collect();
-                let offsets: Vec<_> = vecs.iter().map(|v| v.len()).collect();
-                let offset_buffer = OffsetBuffer::from_lengths(offsets);
-                let field = ArrowField::try_from(data.array_type())?;
-                Arc::new(ListArray::new(
-                    Arc::new(field),
-                    offset_buffer,
-                    concat(values.as_slice())?,
-                    None,
-                ))
-            }
-            Null(DataType::BYTE) => Arc::new(Int8Array::new_null(num_rows)),
-            Null(DataType::SHORT) => Arc::new(Int16Array::new_null(num_rows)),
-            Null(DataType::INTEGER) => Arc::new(Int32Array::new_null(num_rows)),
-            Null(DataType::LONG) => Arc::new(Int64Array::new_null(num_rows)),
-            Null(DataType::FLOAT) => Arc::new(Float32Array::new_null(num_rows)),
-            Null(DataType::DOUBLE) => Arc::new(Float64Array::new_null(num_rows)),
-            Null(DataType::STRING) => Arc::new(StringArray::new_null(num_rows)),
-            Null(DataType::BOOLEAN) => Arc::new(BooleanArray::new_null(num_rows)),
-            Null(DataType::TIMESTAMP) => {
-                Arc::new(TimestampMicrosecondArray::new_null(num_rows).with_timezone("UTC"))
-            }
-            Null(DataType::TIMESTAMP_NTZ) => {
-                Arc::new(TimestampMicrosecondArray::new_null(num_rows))
-            }
-            Null(DataType::DATE) => Arc::new(Date32Array::new_null(num_rows)),
-            Null(DataType::BINARY) => Arc::new(BinaryArray::new_null(num_rows)),
-            Null(DataType::Primitive(PrimitiveType::Decimal(dtype))) => Arc::new(
-                Decimal128Array::new_null(num_rows)
-                    .with_precision_and_scale(dtype.precision(), dtype.scale() as i8)?, // 0..=38
-            ),
-            Null(DataType::Struct(t)) => {
-                let fields: Fields = t.fields().map(ArrowField::try_from).try_collect()?;
-                Arc::new(StructArray::new_null(fields, num_rows))
-            }
-            Null(DataType::Array(t)) => {
-                let field = ArrowField::new(LIST_ARRAY_ROOT, t.element_type().try_into()?, true);
-                Arc::new(ListArray::new_null(Arc::new(field), num_rows))
-            }
-            Null(DataType::Map { .. }) => {
-                return Err(Error::unsupported(
-                    "Scalar::to_array does not yet support Map types",
-                ));
-            }
-        };
-        Ok(arr)
-    }
+/// Convert scalar to arrow array.
+pub fn scalar_to_array(scalar: &Scalar, num_rows: usize) -> DeltaResult<ArrayRef> {
+    use Scalar::*;
+    let arr: ArrayRef = match scalar {
+        Integer(val) => Arc::new(Int32Array::from_value(*val, num_rows)),
+        Long(val) => Arc::new(Int64Array::from_value(*val, num_rows)),
+        Short(val) => Arc::new(Int16Array::from_value(*val, num_rows)),
+        Byte(val) => Arc::new(Int8Array::from_value(*val, num_rows)),
+        Float(val) => Arc::new(Float32Array::from_value(*val, num_rows)),
+        Double(val) => Arc::new(Float64Array::from_value(*val, num_rows)),
+        String(val) => Arc::new(StringArray::from(vec![val.clone(); num_rows])),
+        Boolean(val) => Arc::new(BooleanArray::from(vec![*val; num_rows])),
+        Timestamp(val) => {
+            Arc::new(TimestampMicrosecondArray::from_value(*val, num_rows).with_timezone("UTC"))
+        }
+        TimestampNtz(val) => Arc::new(TimestampMicrosecondArray::from_value(*val, num_rows)),
+        Date(val) => Arc::new(Date32Array::from_value(*val, num_rows)),
+        Binary(val) => Arc::new(BinaryArray::from(vec![val.as_slice(); num_rows])),
+        Decimal(val) => Arc::new(
+            Decimal128Array::from_value(val.bits(), num_rows)
+                .with_precision_and_scale(val.precision(), val.scale() as i8)?, // 0..=38
+        ),
+        Struct(data) => {
+            let arrays = data
+                .values()
+                .iter()
+                .map(|val| val.to_array(num_rows))
+                .try_collect()?;
+            let fields: Fields = data
+                .fields()
+                .iter()
+                .map(ArrowField::try_from)
+                .try_collect()?;
+            Arc::new(StructArray::try_new(fields, arrays, None)?)
+        }
+        Array(data) => {
+            #[allow(deprecated)]
+            let values = data.array_elements();
+            let vecs: Vec<_> = values.iter().map(|v| v.to_array(num_rows)).try_collect()?;
+            let values: Vec<_> = vecs.iter().map(|x| x.as_ref()).collect();
+            let offsets: Vec<_> = vecs.iter().map(|v| v.len()).collect();
+            let offset_buffer = OffsetBuffer::from_lengths(offsets);
+            let field = ArrowField::try_from(data.array_type())?;
+            Arc::new(ListArray::new(
+                Arc::new(field),
+                offset_buffer,
+                concat(values.as_slice())?,
+                None,
+            ))
+        }
+        Null(DataType::BYTE) => Arc::new(Int8Array::new_null(num_rows)),
+        Null(DataType::SHORT) => Arc::new(Int16Array::new_null(num_rows)),
+        Null(DataType::INTEGER) => Arc::new(Int32Array::new_null(num_rows)),
+        Null(DataType::LONG) => Arc::new(Int64Array::new_null(num_rows)),
+        Null(DataType::FLOAT) => Arc::new(Float32Array::new_null(num_rows)),
+        Null(DataType::DOUBLE) => Arc::new(Float64Array::new_null(num_rows)),
+        Null(DataType::STRING) => Arc::new(StringArray::new_null(num_rows)),
+        Null(DataType::BOOLEAN) => Arc::new(BooleanArray::new_null(num_rows)),
+        Null(DataType::TIMESTAMP) => {
+            Arc::new(TimestampMicrosecondArray::new_null(num_rows).with_timezone("UTC"))
+        }
+        Null(DataType::TIMESTAMP_NTZ) => Arc::new(TimestampMicrosecondArray::new_null(num_rows)),
+        Null(DataType::DATE) => Arc::new(Date32Array::new_null(num_rows)),
+        Null(DataType::BINARY) => Arc::new(BinaryArray::new_null(num_rows)),
+        Null(DataType::Primitive(PrimitiveType::Decimal(dtype))) => Arc::new(
+            Decimal128Array::new_null(num_rows)
+                .with_precision_and_scale(dtype.precision(), dtype.scale() as i8)?, // 0..=38
+        ),
+        Null(DataType::Struct(t)) => {
+            let fields: Fields = t.fields().map(ArrowField::try_from).try_collect()?;
+            Arc::new(StructArray::new_null(fields, num_rows))
+        }
+        Null(DataType::Array(t)) => {
+            // FIXME
+            let field = ArrowField::new("element", t.element_type().try_into()?, true);
+            Arc::new(ListArray::new_null(Arc::new(field), num_rows))
+        }
+        Null(DataType::Map { .. }) => {
+            return Err(Error::unsupported(
+                "Scalar::to_array does not yet support Map types",
+            ));
+        }
+    };
+    Ok(arr)
 }
 
 #[derive(Debug)]
@@ -145,7 +141,7 @@ impl EvaluationHandler for ArrowEvaluationHandler {
     fn null_row(&self, output_schema: SchemaRef) -> DeltaResult<Box<dyn EngineData>> {
         let fields = output_schema.fields();
         let arrays = fields
-            .map(|field| Scalar::Null(field.data_type().clone()).to_array(1))
+            .map(|field| scalar_to_array(&Scalar::Null(field.data_type().clone()), 1))
             .try_collect()?;
         let record_batch =
             RecordBatch::try_new(Arc::new(output_schema.as_ref().try_into()?), arrays)?;

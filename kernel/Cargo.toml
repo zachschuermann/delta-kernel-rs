@@ -52,9 +52,16 @@ url = "2"
 uuid = { version = "1.16.0", features = ["v4", "fast-rng"] }
 z85 = "3.0.6"
 
+arrow-array-55 = { package = "arrow-array", version = "55", optional = true }
+arrow-schema-55 = { package = "arrow-schema", version = "55", optional = true }
+arrow-array-54 = { package = "arrow-array", version = "54.3", optional = true }
+arrow-schema-54 = { package = "arrow-schema", version = "54.3", optional = true }
+
 [features]
 default = [] # no default features
 internal-api = [] # internal-api will make everything marked #[internal_api] public
+arrow-conversion-55 = [ "arrow-array-55", "arrow-schema-55" ] # conversion to/from arrow 55 types
+arrow-conversion-54 = [ "arrow-array-54", "arrow-schema-54" ] # conversion to/from arrow 54 types
 
 [build-dependencies]
 rustc_version = "0.4.1"

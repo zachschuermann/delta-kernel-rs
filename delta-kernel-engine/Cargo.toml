@@ -61,10 +61,11 @@ features = [ "aws", "azure", "gcp", "http" ]
 optional = true
 
 [features]
-default = [ "arrow-54", "reqwest/default" ]
-arrow-54 = [ "dep:arrow_54", "dep:parquet_54", "dep:object_store_54" ]
-arrow-55 = [ "dep:arrow_55", "dep:parquet_55", "dep:object_store_55" ]
+default = [ "arrow-54", "reqwest/default", ]
+arrow-54 = [ "dep:arrow_54", "dep:parquet_54", "dep:object_store_54", "delta_kernel/arrow-conversion-54" ]
+arrow-55 = [ "dep:arrow_55", "dep:parquet_55", "dep:object_store_55", "delta_kernel/arrow-conversion-55" ]
 rustls = [ "reqwest/rustls-tls-native-roots", "reqwest/http2" ]
 
 [dev-dependencies]
+test_utils = { path = "../test-utils" }
 async-trait = "0.1" # only used for our custom SlowGetStore ObjectStore implementation

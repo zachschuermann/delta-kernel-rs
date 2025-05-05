@@ -10,9 +10,9 @@ use crate::arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField};
 use itertools::Itertools;
 
 use crate::arrow_utils::make_arrow_error;
+use crate::require;
 
 use delta_kernel::schema::{DataType, MetadataValue, StructField};
-use delta_kernel::utils::require;
 use delta_kernel::{DeltaResult, Error};
 
 /// Ensure a kernel data type matches an arrow data type. This only ensures that the actual "type"

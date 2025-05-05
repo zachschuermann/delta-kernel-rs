@@ -88,7 +88,11 @@ pub mod table_features;
 pub mod table_properties;
 pub mod transaction;
 
-pub(crate) mod kernel_predicates;
+// FIXME
+#[cfg(any(feature = "arrow-conversion-55", feature = "arrow-conversion-54"))]
+pub mod arrow_conversion;
+
+pub mod kernel_predicates;
 pub(crate) mod utils;
 
 internal_mod!(pub(crate) mod path);
