@@ -3,7 +3,9 @@ members = [
     "acceptance",
     "derive-macros",
     "ffi",
+    "delta-kernel-engine-ffi",
     "kernel",
+    "delta-kernel-engine",
     "kernel/examples/*",
     "test-utils",
 ]
