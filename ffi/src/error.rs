@@ -51,7 +51,6 @@ pub enum KernelError {
 impl From<Error> for KernelError {
     fn from(e: Error) -> Self {
         match e {
-            // NOTE: By definition, no kernel Error maps to FFIError
             Error::CheckpointWrite(_) => KernelError::CheckpointWriteError,
             Error::EngineDataType(_) => KernelError::EngineDataTypeError,
             Error::Extract(..) => KernelError::ExtractError,
