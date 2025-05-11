@@ -23,11 +23,16 @@ jobs:
       - name: Setup rust toolchain
         if: ${{ !matrix.skip }}
         uses: actions-rust-lang/setup-rust-toolchain@v1
-      - name: Run HDFS integration tests
-        if: ${{ !matrix.skip }}
-        shell: bash
-        run: pushd hdfs-integration-test && cargo test --features integration-test
       - name: Run integration tests
         if: ${{ !matrix.skip }}
         shell: bash
         run: pushd integration-tests && ./test-all-arrow-versions.sh
+      - name: Set up Maven
+        if: ${{ !matrix.skip }}
+        uses: stCarolas/setup-maven@v5
+        with:
+          maven-version: 3.8.2
+      - name: Run HDFS integration tests
+        if: ${{ !matrix.skip }}
+        shell: bash
+        run: pushd hdfs-integration-test && cargo test --features integration-test
