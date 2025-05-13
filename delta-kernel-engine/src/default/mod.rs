@@ -26,6 +26,7 @@ use self::parquet::DefaultParquetHandler;
 use self::storage::parse_url_opts;
 use super::arrow_data::ArrowEngineData;
 use super::arrow_expression::ArrowEvaluationHandler;
+use crate::arrow_conversion::TryIntoKernel;
 use crate::{EngineError, EngineResult};
 
 pub mod executor;
@@ -106,8 +107,8 @@ impl<E: TaskExecutor> DefaultEngine<E> {
         let input_schema: Schema = data
             .record_batch()
             .schema()
-            .try_into()
-            .map_err(EngineError::from)?;
+            .into_kernel()
+            .map_err(|e| EngineError::from(e))?;
         let output_schema = write_context.schema();
         let logical_to_physical_expr = self.evaluation_handler().new_expression_evaluator(
             input_schema.into(),
@@ -123,6 +124,7 @@ impl<E: TaskExecutor> DefaultEngine<E> {
                 data_change,
             )
             .await
+            .map_err(Into::into)
     }
 }
 

@@ -25,6 +25,7 @@ use delta_kernel::{
 use itertools::Itertools;
 use tracing::debug;
 
+use crate::arrow_conversion::TryIntoArrow;
 use crate::arrow_data::ArrowEngineData;
 use crate::ensure_data_types::DataTypeCompat;
 use crate::require;
@@ -424,7 +425,7 @@ fn get_indices(
                     debug!("Inserting missing and nullable field: {}", field.name());
                     reorder_indices.push(ReorderIndex::missing(
                         requested_position,
-                        Arc::new(field.try_into()?),
+                        Arc::new(field.into_arrow()?),
                     ));
                 } else {
                     return Err(Error::Generic(format!(
@@ -695,7 +696,7 @@ pub(crate) fn parse_json(
         .ok_or_else(|| {
             Error::generic("Expected json_strings to be a StringArray, found something else")
         })?;
-    let schema: ArrowSchemaRef = Arc::new(schema.as_ref().try_into()?);
+    let schema: ArrowSchemaRef = Arc::new(schema.as_ref().into_arrow()?);
     let result = parse_json_impl(json_strings, schema)?;
     Ok(Box::new(ArrowEngineData::new(result)))
 }

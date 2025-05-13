@@ -25,6 +25,7 @@ use uuid::Uuid;
 
 use super::file_stream::{FileOpenFuture, FileOpener, FileStream};
 use super::UrlExt;
+use crate::arrow_conversion::TryIntoArrow;
 use crate::arrow_data::ArrowEngineData;
 use crate::arrow_utils::{fixup_parquet_read, generate_mask, get_requested_indices};
 use crate::default::executor::TaskExecutor;
@@ -90,7 +91,12 @@ impl DataFileMetadata {
         let data_change = Arc::new(BooleanArray::from(vec![data_change]));
         let modification_time = Arc::new(Int64Array::from(vec![*last_modified]));
         Ok(Box::new(ArrowEngineData::new(RecordBatch::try_new(
-            Arc::new(write_metadata_schema.as_ref().try_into()?),
+            Arc::new(
+                write_metadata_schema
+                    .as_ref()
+                    .into_arrow()
+                    .map_err(|e| EngineError::from(e))?,
+            ),
             vec![path, partitions, size, modification_time, data_change],
         )?)))
     }
@@ -225,8 +231,8 @@ impl<E: TaskExecutor> ParquetHandler for DefaultParquetHandler<E> {
             Arc::new(
                 physical_schema
                     .as_ref()
-                    .try_into()
-                    .map_err(EngineError::from)?,
+                    .into_arrow()
+                    .map_err(|e| EngineError::from(e))?,
             ),
             file_opener,
             files,

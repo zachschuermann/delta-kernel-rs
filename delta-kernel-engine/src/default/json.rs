@@ -17,6 +17,7 @@ use tracing::warn;
 use url::Url;
 
 use super::executor::TaskExecutor;
+use crate::arrow_conversion::TryIntoArrow;
 use crate::arrow_data::ArrowEngineData;
 use crate::arrow_utils::parse_json as arrow_parse_json;
 use crate::arrow_utils::to_json_bytes;
@@ -106,8 +107,8 @@ impl<E: TaskExecutor> JsonHandler for DefaultJsonHandler<E> {
         let schema: ArrowSchemaRef = Arc::new(
             physical_schema
                 .as_ref()
-                .try_into()
-                .map_err(EngineError::from)?,
+                .into_arrow()
+                .map_err(|e| EngineError::from(e))?,
         );
         let file_opener = JsonOpener::new(self.batch_size, schema.clone(), self.store.clone());
 
