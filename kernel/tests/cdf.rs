@@ -1,12 +1,15 @@
 use std::{error, sync::Arc};
 
-use delta_kernel::arrow::array::RecordBatch;
-use delta_kernel::arrow::compute::filter_record_batch;
-use delta_kernel::engine::sync::SyncEngine;
-use itertools::Itertools;
+use delta_kernel_engine::arrow::array::RecordBatch;
+use delta_kernel_engine::arrow::compute::filter_record_batch;
+use delta_kernel_engine::default::executor::tokio::TokioBackgroundExecutor;
+use delta_kernel_engine::default::DefaultEngine;
+use delta_kernel_engine::object_store::local::LocalFileSystem;
+use delta_kernel_engine::EngineResult;
 
-use delta_kernel::engine::arrow_data::ArrowEngineData;
 use delta_kernel::{DeltaResult, Error, PredicateRef, Table, Version};
+
+use itertools::Itertools;
 
 mod common;
 use common::{load_test_data, to_arrow};
@@ -20,7 +23,11 @@ fn read_cdf_for_table(
     let test_dir = load_test_data("tests/data", test_name.as_ref()).unwrap();
     let test_path = test_dir.path().join(test_name.as_ref());
     let table = Table::try_from_uri(test_path.to_str().expect("table path to string")).unwrap();
-    let engine = Arc::new(SyncEngine::new());
+    let object_store = Arc::new(LocalFileSystem::new());
+    let engine = Arc::new(DefaultEngine::new(
+        object_store,
+        TokioBackgroundExecutor::new().into(),
+    ));
     let table_changes = table.table_changes(engine.as_ref(), start_version, end_version)?;
 
     // Project out the commit timestamp since file modification time may change anytime git clones
@@ -39,7 +46,7 @@ fn read_cdf_for_table(
         .build()?;
     let batches: Vec<RecordBatch> = scan
         .execute(engine)?
-        .map(|scan_result| -> DeltaResult<_> {
+        .map(|scan_result| -> EngineResult<_> {
             let scan_result = scan_result?;
             let mask = scan_result.full_mask();
             let data = scan_result.raw_data?;

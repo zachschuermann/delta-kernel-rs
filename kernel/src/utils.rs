@@ -14,15 +14,15 @@ pub(crate) use require;
 #[cfg(test)]
 pub(crate) mod test_utils {
     use crate::actions::{get_log_schema, Add, Cdc, CommitInfo, Metadata, Protocol, Remove};
-    use crate::arrow::array::{RecordBatch, StringArray};
-    use crate::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
-    use crate::engine::arrow_data::ArrowEngineData;
     use crate::engine::sync::SyncEngine;
     use crate::Engine;
     use crate::EngineData;
+    use delta_kernel_engine::arrow::array::{RecordBatch, StringArray};
+    use delta_kernel_engine::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
+    use delta_kernel_engine::arrow_data::ArrowEngineData;
 
-    use crate::object_store::local::LocalFileSystem;
-    use crate::object_store::ObjectStore;
+    use delta_kernel_engine::object_store::local::LocalFileSystem;
+    use delta_kernel_engine::object_store::ObjectStore;
     use itertools::Itertools;
     use serde::Serialize;
     use std::{path::Path, sync::Arc};

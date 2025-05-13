@@ -54,22 +54,6 @@ fn get_engine_builder_impl(
     Ok(Box::into_raw(builder))
 }
 
-#[cfg(feature = "default-engine")]
-fn get_default_engine_impl(
-    url: Url,
-    options: HashMap<String, String>,
-    allocate_error: AllocateErrorFn,
-) -> DeltaResult<Handle<SharedExternEngine>> {
-    use delta_kernel::engine::default::executor::tokio::TokioBackgroundExecutor;
-    use delta_kernel::engine::default::DefaultEngine;
-    let engine = DefaultEngine::<TokioBackgroundExecutor>::try_new(
-        &url,
-        options,
-        Arc::new(TokioBackgroundExecutor::new()),
-    );
-    Ok(engine_to_handle(Arc::new(engine?), allocate_error))
-}
-
 /// Set an option on the builder
 ///
 /// # Safety

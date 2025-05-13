@@ -770,7 +770,7 @@ mod tests {
         buffer::{OffsetBuffer, ScalarBuffer},
     };
 
-    use crate::schema::{ArrayType, DataType, MapType, StructField, StructType};
+    use delta_kernel::schema::{ArrayType, DataType, MapType, StructField, StructType};
 
     use super::*;
 

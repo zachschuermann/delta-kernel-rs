@@ -2,8 +2,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use acceptance::read_dat_case;
-use delta_kernel::engine::default::executor::tokio::TokioBackgroundExecutor;
-use delta_kernel::engine::default::DefaultEngine;
+use delta_kernel_engine::default::executor::tokio::TokioBackgroundExecutor;
+use delta_kernel_engine::default::DefaultEngine;
 
 // TODO(zach): skip iceberg_compat_v1 test until DAT is fixed
 static SKIPPED_TESTS: &[&str; 1] = &["iceberg_compat_v1"];

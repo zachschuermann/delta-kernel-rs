@@ -2,22 +2,23 @@ use std::{sync::Arc, time::Duration};
 
 use super::DEFAULT_RETENTION_SECS;
 use crate::actions::{Add, Metadata, Protocol, Remove};
-use crate::arrow::array::{ArrayRef, StructArray};
-use crate::arrow::datatypes::{DataType, Schema};
 use crate::checkpoint::deleted_file_retention_timestamp_with_time;
-use crate::engine::arrow_data::ArrowEngineData;
-use crate::engine::default::{executor::tokio::TokioBackgroundExecutor, DefaultEngine};
-use crate::object_store::{memory::InMemory, path::Path, ObjectStore};
 use crate::utils::test_utils::Action;
 use crate::DeltaResult;
 use crate::Table;
 
-use arrow_55::{
+use delta_kernel_engine::arrow::array::{ArrayRef, StructArray};
+use delta_kernel_engine::arrow::datatypes::{DataType, Schema};
+use test_utils::delta_path_for_version;
+
+use delta_kernel_engine::arrow::{
     array::{create_array, RecordBatch},
     datatypes::Field,
 };
+use delta_kernel_engine::arrow_data::ArrowEngineData;
+use delta_kernel_engine::default::{executor::tokio::TokioBackgroundExecutor, DefaultEngine};
+use delta_kernel_engine::object_store::{memory::InMemory, path::Path, ObjectStore};
 
-use test_utils::delta_path_for_version;
 use url::Url;
 
 #[test]
@@ -54,7 +55,7 @@ fn test_deleted_file_retention_timestamp() -> DeltaResult<()> {
 }
 
 #[test]
-fn test_create_checkpoint_metadata_batch() -> DeltaResult<()> {
+fn test_create_checkpoint_metadata_batch() -> Result<(), Box<dyn std::error::Error>> {
     let (store, _) = new_in_memory_store();
     let engine = DefaultEngine::new(store.clone(), Arc::new(TokioBackgroundExecutor::new()));
 

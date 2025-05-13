@@ -260,9 +260,9 @@ mod tests {
     use std::sync::{mpsc, Arc, Mutex};
     use std::task::Waker;
 
-    use crate::actions::get_log_schema;
     use crate::arrow::array::{AsArray, Int32Array, RecordBatch, StringArray};
     use crate::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
+    use crate::arrow_conversion::TryIntoArrow;
     use crate::arrow_data::ArrowEngineData;
     use crate::default::executor::tokio::{TokioBackgroundExecutor, TokioMultiThreadExecutor};
     use crate::object_store::local::LocalFileSystem;
@@ -271,10 +271,11 @@ mod tests {
         GetOptions, GetResult, ListResult, MultipartUpload, ObjectMeta, ObjectStore,
         PutMultipartOpts, PutOptions, PutPayload, PutResult, Result,
     };
-    use crate::utils::test_utils::string_array_to_engine_data;
+    use delta_kernel::actions::get_log_schema;
     use futures::future;
     use itertools::Itertools;
     use serde_json::json;
+    use test_utils::string_array_to_engine_data;
 
     // TODO: should just use the one from test_utils, but running into dependency issues
     fn into_record_batch(engine_data: Box<dyn EngineData>) -> RecordBatch {
@@ -284,6 +285,7 @@ mod tests {
     }
 
     use super::*;
+    use delta_kernel::schema::StructField;
 
     /// Store wrapper that wraps an inner store to guarantee the ordering of GET requests. Note
     /// that since the keys are resolved in order, requests to subsequent keys in the order will
@@ -547,7 +549,7 @@ mod tests {
         }];
 
         let handler = DefaultJsonHandler::new(store, Arc::new(TokioBackgroundExecutor::new()));
-        let physical_schema = Arc::new(ArrowSchema::try_from(get_log_schema().as_ref()).unwrap());
+        let physical_schema = get_log_schema().clone();
         let data: Vec<RecordBatch> = handler
             .read_json_files(files, get_log_schema().clone(), None)
             .unwrap()
@@ -561,7 +563,7 @@ mod tests {
         // limit batch size
         let handler = handler.with_batch_size(2);
         let data: Vec<RecordBatch> = handler
-            .read_json_files(files, Arc::new(physical_schema.try_into().unwrap()), None)
+            .read_json_files(files, physical_schema, None)
             .unwrap()
             .map_ok(into_record_batch)
             .try_collect()
@@ -711,14 +713,15 @@ mod tests {
                 )),
             );
             let handler = handler.with_buffer_size(*buffer_size);
-            let schema = Arc::new(ArrowSchema::new(vec![Arc::new(Field::new(
+            use delta_kernel::schema::DataType as DeltaDataType;
+            use delta_kernel::schema::Schema;
+            let schema = Arc::new(Schema::new(vec![StructField::new(
                 "val",
-                DataType::Int32,
+                DeltaDataType::INTEGER,
                 true,
-            ))]));
-            let physical_schema = Arc::new(schema.try_into().unwrap());
+            )]));
             let data: Vec<RecordBatch> = handler
-                .read_json_files(&files, physical_schema, None)
+                .read_json_files(&files, schema, None)
                 .unwrap()
                 .map_ok(into_record_batch)
                 .try_collect()
@@ -737,7 +740,9 @@ mod tests {
     }
 
     // Helper function to create test data
-    fn create_test_data(values: Vec<&str>) -> DeltaResult<Box<dyn EngineData>> {
+    fn create_test_data(
+        values: Vec<&str>,
+    ) -> Result<Box<dyn EngineData>, Box<dyn std::error::Error>> {
         let schema = Arc::new(ArrowSchema::new(vec![Field::new(
             "dog",
             DataType::Utf8,
@@ -752,7 +757,7 @@ mod tests {
     async fn read_json_file(
         store: &Arc<InMemory>,
         path: &Path,
-    ) -> DeltaResult<Vec<serde_json::Value>> {
+    ) -> EngineResult<Vec<serde_json::Value>> {
         let content = store.get(path).await?;
         let file_bytes = content.bytes().await?;
         let file_string =
@@ -768,16 +773,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_write_json_file_without_overwrite() -> DeltaResult<()> {
+    async fn test_write_json_file_without_overwrite() -> Result<(), Box<dyn std::error::Error>> {
         do_test_write_json_file(false).await
     }
 
     #[tokio::test]
-    async fn test_write_json_file_overwrite() -> DeltaResult<()> {
+    async fn test_write_json_file_overwrite() -> Result<(), Box<dyn std::error::Error>> {
         do_test_write_json_file(true).await
     }
 
-    async fn do_test_write_json_file(overwrite: bool) -> DeltaResult<()> {
+    async fn do_test_write_json_file(overwrite: bool) -> Result<(), Box<dyn std::error::Error>> {
         let store = Arc::new(InMemory::new());
         let executor = Arc::new(TokioBackgroundExecutor::new());
         let handler = DefaultJsonHandler::new(store.clone(), executor);

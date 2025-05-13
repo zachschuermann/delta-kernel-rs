@@ -132,3 +132,13 @@ pub fn into_record_batch(engine_data: Box<dyn EngineData>) -> RecordBatch {
         .unwrap()
         .into()
 }
+
+/// FIXME: copied from kernel/src/utils.rs
+use delta_kernel_engine::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
+pub fn string_array_to_engine_data(string_array: StringArray) -> Box<dyn EngineData> {
+    let string_field = Arc::new(Field::new("a", DataType::Utf8, true));
+    let schema = Arc::new(ArrowSchema::new(vec![string_field]));
+    let batch = RecordBatch::try_new(schema, vec![Arc::new(string_array)])
+        .expect("Can't convert to record batch");
+    Box::new(ArrowEngineData::new(batch))
+}

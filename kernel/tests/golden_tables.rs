@@ -3,31 +3,35 @@
 //! Data (golden tables) are stored in tests/golden_data/<table_name>.tar.zst
 //! Each table directory has a table/ and expected/ subdirectory with the input/output respectively
 
-use delta_kernel::arrow::array::{Array, AsArray, StructArray};
-use delta_kernel::arrow::compute::{concat_batches, take};
-use delta_kernel::arrow::compute::{lexsort_to_indices, SortColumn};
-use delta_kernel::arrow::datatypes::{DataType, FieldRef, Schema};
-use delta_kernel::arrow::{compute::filter_record_batch, record_batch::RecordBatch};
-use itertools::Itertools;
-use paste::paste;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use delta_kernel::object_store::{local::LocalFileSystem, ObjectStore};
-use delta_kernel::parquet::arrow::async_reader::{
+use delta_kernel_engine::arrow::array::{Array, AsArray, StructArray};
+use delta_kernel_engine::arrow::compute::{concat_batches, take};
+use delta_kernel_engine::arrow::compute::{lexsort_to_indices, SortColumn};
+use delta_kernel_engine::arrow::datatypes::{DataType, FieldRef, Schema};
+use delta_kernel_engine::arrow::{compute::filter_record_batch, record_batch::RecordBatch};
+
+use delta_kernel::Table;
+use delta_kernel_engine::arrow_conversion::TryIntoArrow;
+use delta_kernel_engine::object_store::{local::LocalFileSystem, ObjectStore};
+use delta_kernel_engine::parquet::arrow::async_reader::{
     ParquetObjectReader, ParquetRecordBatchStreamBuilder,
 };
-use delta_kernel::{engine::arrow_data::ArrowEngineData, DeltaResult, Table};
-use futures::{stream::TryStreamExt, StreamExt};
+use delta_kernel_engine::EngineResult;
 
-use delta_kernel::engine::default::executor::tokio::TokioBackgroundExecutor;
-use delta_kernel::engine::default::DefaultEngine;
+use delta_kernel_engine::default::executor::tokio::TokioBackgroundExecutor;
+use delta_kernel_engine::default::DefaultEngine;
+
+use futures::{stream::TryStreamExt, StreamExt};
+use itertools::Itertools;
+use paste::paste;
 
 mod common;
 use common::{load_test_data, to_arrow};
 
 // NB adapted from DAT: read all parquet files in the directory and concatenate them
-async fn read_expected(path: &Path) -> DeltaResult<RecordBatch> {
+async fn read_expected(path: &Path) -> EngineResult<RecordBatch> {
     let store = Arc::new(LocalFileSystem::new_with_prefix(path)?);
     let files = store.list(None).try_collect::<Vec<_>>().await?;
     let mut batches = vec![];
@@ -52,7 +56,7 @@ async fn read_expected(path: &Path) -> DeltaResult<RecordBatch> {
 }
 
 // copied from DAT
-fn sort_record_batch(batch: RecordBatch) -> DeltaResult<RecordBatch> {
+fn sort_record_batch(batch: RecordBatch) -> EngineResult<RecordBatch> {
     if batch.num_rows() < 2 {
         // 0 or 1 rows doesn't need sorting
         return Ok(batch);
@@ -168,7 +172,7 @@ async fn latest_snapshot_test(
     let scan = snapshot.into_scan_builder().build()?;
     let scan_res = scan.execute(Arc::new(engine))?;
     let batches: Vec<RecordBatch> = scan_res
-        .map(|scan_result| -> DeltaResult<_> {
+        .map(|scan_result| -> EngineResult<_> {
             let scan_result = scan_result?;
             let mask = scan_result.full_mask();
             let data = scan_result.raw_data?;
@@ -183,7 +187,7 @@ async fn latest_snapshot_test(
 
     let expected = read_expected(&expected_path.expect("expect an expected dir")).await?;
 
-    let schema: Arc<Schema> = Arc::new(scan.schema().as_ref().try_into()?);
+    let schema: Arc<Schema> = Arc::new(scan.schema().as_ref().into_arrow()?);
     let result = concat_batches(&schema, &batches)?;
     let result = sort_record_batch(result)?;
     let expected = sort_record_batch(expected)?;

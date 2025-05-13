@@ -704,20 +704,17 @@ pub fn selection_vector(
 // some utils that are used in file_stream.rs and state.rs tests
 #[cfg(test)]
 pub(crate) mod test_utils {
-    use crate::arrow::array::StringArray;
     use crate::utils::test_utils::string_array_to_engine_data;
+    use delta_kernel_engine::arrow::array::StringArray;
     use itertools::Itertools;
     use std::sync::Arc;
 
+    use delta_kernel_engine::arrow_data::ArrowEngineData;
+
+    use crate::engine::sync::{json::SyncJsonHandler, SyncEngine};
+
     use crate::{
-        actions::get_log_schema,
-        engine::{
-            arrow_data::ArrowEngineData,
-            sync::{json::SyncJsonHandler, SyncEngine},
-        },
-        scan::log_replay::scan_action_iter,
-        schema::SchemaRef,
-        JsonHandler,
+        actions::get_log_schema, scan::log_replay::scan_action_iter, schema::SchemaRef, JsonHandler,
     };
 
     use super::{state::ScanCallback, Transform};

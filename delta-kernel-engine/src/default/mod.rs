@@ -12,7 +12,7 @@ use std::sync::Arc;
 use delta_kernel::schema::Schema;
 use delta_kernel::transaction::WriteContext;
 use delta_kernel::{
-    DeltaResult, Engine, EngineData, EvaluationHandler, JsonHandler, ParquetHandler, StorageHandler,
+    Engine, EngineData, EvaluationHandler, JsonHandler, ParquetHandler, StorageHandler,
 };
 
 use crate::object_store::DynObjectStore;
@@ -102,7 +102,7 @@ impl<E: TaskExecutor> DefaultEngine<E> {
         write_context: &WriteContext,
         partition_values: HashMap<String, String>,
         data_change: bool,
-    ) -> DeltaResult<Box<dyn EngineData>> {
+    ) -> EngineResult<Box<dyn EngineData>> {
         let transform = write_context.logical_to_physical();
         let input_schema: Schema = data
             .record_batch()
@@ -124,7 +124,6 @@ impl<E: TaskExecutor> DefaultEngine<E> {
                 data_change,
             )
             .await
-            .map_err(Into::into)
     }
 }
 

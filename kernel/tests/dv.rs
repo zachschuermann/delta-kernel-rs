@@ -4,7 +4,10 @@ use std::ops::Add;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use delta_kernel::engine::SyncEngine;
+use delta_kernel_engine::default::executor::tokio::TokioBackgroundExecutor;
+use delta_kernel_engine::default::DefaultEngine;
+use delta_kernel_engine::object_store::local::LocalFileSystem;
+
 use delta_kernel::scan::ScanResult;
 use delta_kernel::{DeltaResult, Table};
 
@@ -26,11 +29,19 @@ fn count_total_scan_rows(
         .fold_ok(0, Add::add)
 }
 
+fn new_engine() -> Arc<DefaultEngine<TokioBackgroundExecutor>> {
+    let object_store = Arc::new(LocalFileSystem::new());
+    Arc::new(DefaultEngine::new(
+        object_store,
+        TokioBackgroundExecutor::new().into(),
+    ))
+}
+
 #[test]
 fn dv_table() -> Result<(), Box<dyn std::error::Error>> {
     let path = std::fs::canonicalize(PathBuf::from("./tests/data/table-with-dv-small/"))?;
     let url = url::Url::from_directory_path(path).unwrap();
-    let engine = Arc::new(SyncEngine::new());
+    let engine = new_engine();
 
     let table = Table::new(url);
     let snapshot = table.snapshot(engine.as_ref(), None)?;
@@ -46,7 +57,7 @@ fn dv_table() -> Result<(), Box<dyn std::error::Error>> {
 fn non_dv_table() -> Result<(), Box<dyn std::error::Error>> {
     let path = std::fs::canonicalize(PathBuf::from("./tests/data/table-without-dv-small/"))?;
     let url = url::Url::from_directory_path(path).unwrap();
-    let engine = Arc::new(SyncEngine::new());
+    let engine = new_engine();
 
     let table = Table::new(url);
     let snapshot = table.snapshot(engine.as_ref(), None)?;

@@ -1,18 +1,19 @@
 use std::{fs::File, io::BufReader, io::Write};
 
-use crate::arrow::datatypes::SchemaRef as ArrowSchemaRef;
-use crate::arrow::json::ReaderBuilder;
+use delta_kernel_engine::arrow::datatypes::SchemaRef as ArrowSchemaRef;
+use delta_kernel_engine::arrow::json::ReaderBuilder;
 use tempfile::NamedTempFile;
 use url::Url;
 
 use super::read_files;
-use crate::engine::arrow_data::ArrowEngineData;
-use crate::engine::arrow_utils::parse_json as arrow_parse_json;
-use crate::engine::arrow_utils::to_json_bytes;
 use crate::schema::SchemaRef;
 use crate::{
     DeltaResult, EngineData, Error, FileDataReadResultIterator, FileMeta, JsonHandler, PredicateRef,
 };
+use delta_kernel_engine::arrow_data::ArrowEngineData;
+use delta_kernel_engine::arrow_utils::parse_json as arrow_parse_json;
+use delta_kernel_engine::arrow_utils::to_json_bytes;
+use delta_kernel_engine::EngineResult;
 
 pub(crate) struct SyncJsonHandler;
 
@@ -21,7 +22,7 @@ fn try_create_from_json(
     _schema: SchemaRef,
     arrow_schema: ArrowSchemaRef,
     _predicate: Option<PredicateRef>,
-) -> DeltaResult<impl Iterator<Item = DeltaResult<ArrowEngineData>>> {
+) -> EngineResult<impl Iterator<Item = DeltaResult<ArrowEngineData>>> {
     let json = ReaderBuilder::new(arrow_schema)
         .build(BufReader::new(file))?
         .map(|data| Ok(ArrowEngineData::new(data?)));
@@ -94,11 +95,15 @@ impl JsonHandler for SyncJsonHandler {
         Ok(())
     }
 }
-#[cfg(test)]
+
+// this is already all cfg test
 mod tests {
     use super::*;
-    use crate::arrow::array::{RecordBatch, StringArray};
-    use crate::arrow::datatypes::{DataType as ArrowDataType, Field, Schema as ArrowSchema};
+    use delta_kernel_engine::arrow::array::{RecordBatch, StringArray};
+    use delta_kernel_engine::arrow::datatypes::{
+        DataType as ArrowDataType, Field, Schema as ArrowSchema,
+    };
+    use delta_kernel_engine::EngineResult;
     use serde_json::json;
     use std::path::Path;
     use std::sync::Arc;
@@ -106,7 +111,7 @@ mod tests {
     use url::Url;
 
     // Helper function to create test data
-    fn create_test_data(values: Vec<&str>) -> DeltaResult<Box<dyn EngineData>> {
+    fn create_test_data(values: Vec<&str>) -> EngineResult<Box<dyn EngineData>> {
         let schema = Arc::new(ArrowSchema::new(vec![Field::new(
             "dog",
             ArrowDataType::Utf8,
@@ -118,7 +123,7 @@ mod tests {
     }
 
     // Helper function to read and parse JSON file
-    fn read_json_file(path: &Path) -> DeltaResult<Vec<serde_json::Value>> {
+    fn read_json_file(path: &Path) -> EngineResult<Vec<serde_json::Value>> {
         let file = std::fs::read_to_string(path)?;
         let json: Vec<_> = serde_json::Deserializer::from_str(&file)
             .into_iter::<serde_json::Value>()
@@ -128,16 +133,16 @@ mod tests {
     }
 
     #[test]
-    fn test_write_json_file_without_overwrite() -> DeltaResult<()> {
+    fn test_write_json_file_without_overwrite() -> EngineResult<()> {
         do_test_write_json_file(false)
     }
 
     #[test]
-    fn test_write_json_file_overwrite() -> DeltaResult<()> {
+    fn test_write_json_file_overwrite() -> EngineResult<()> {
         do_test_write_json_file(true)
     }
 
-    fn do_test_write_json_file(overwrite: bool) -> DeltaResult<()> {
+    fn do_test_write_json_file(overwrite: bool) -> EngineResult<()> {
         let test_dir = TempDir::new().unwrap();
         let path = test_dir.path().join("00000000000000000001.json");
         let handler = SyncJsonHandler;

@@ -25,3 +25,7 @@ repository = "https://github.com/delta-io/delta-kernel-rs"
 readme = "README.md"
 rust-version = "1.81"
 version = "0.10.0"
+
+[workspace.dependencies]
+delta_kernel = { path = "./kernel" }
+delta-kernel-engine = { path = "./delta-kernel-engine" }

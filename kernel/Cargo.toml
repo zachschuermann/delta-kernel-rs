@@ -60,7 +60,7 @@ internal-api = [] # internal-api will make everything marked #[internal_api] pub
 rustc_version = "0.4.1"
 
 [dev-dependencies]
-delta-kernel-engine = { path = "../delta-kernel-engine", features = ["arrow-55"] }
+delta-kernel-engine = { features = ["arrow-55"], workspace = true }
 test_utils = { path = "../test-utils" }
 # Used for testing parse_url_opts extensibility
 hdfs-native-object-store = { version = "0.14.0", features = ["integration-test"] }

@@ -216,11 +216,12 @@ fn evaluate_expression_impl(
 #[cfg(test)]
 mod tests {
     use super::{free_expression_evaluator, new_expression_evaluator};
-    use crate::{free_engine, handle::Handle, tests::get_default_engine, SharedSchema};
+    use crate::{free_engine, handle::Handle, SharedSchema};
     use delta_kernel::{
         schema::{DataType, StructField, StructType},
         Expression,
     };
+    use delta_kernel_engine_ffi::get_default_engine;
     use std::sync::Arc;
 
     #[test]

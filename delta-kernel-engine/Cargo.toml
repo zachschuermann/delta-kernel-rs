@@ -10,7 +10,7 @@ rust-version.workspace = true
 version.workspace = true
 
 [dependencies]
-delta_kernel = { path = "../kernel" }
+delta_kernel = { workspace = true }
 bytes = "1.10"
 chrono = "0.4.40"
 itertools = "0.14"

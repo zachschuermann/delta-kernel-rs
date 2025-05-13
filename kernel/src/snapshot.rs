@@ -405,24 +405,25 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
 
-    use crate::object_store::local::LocalFileSystem;
-    use crate::object_store::memory::InMemory;
-    use crate::object_store::path::Path;
-    use crate::object_store::ObjectStore;
-    use serde_json::json;
+    use delta_kernel_engine::arrow::array::StringArray;
+    use delta_kernel_engine::arrow::record_batch::RecordBatch;
+    use delta_kernel_engine::object_store::local::LocalFileSystem;
+    use delta_kernel_engine::object_store::memory::InMemory;
+    use delta_kernel_engine::object_store::path::Path;
+    use delta_kernel_engine::object_store::ObjectStore;
+    use delta_kernel_engine::parquet::arrow::ArrowWriter;
 
-    use crate::arrow::array::StringArray;
-    use crate::arrow::record_batch::RecordBatch;
-    use crate::parquet::arrow::ArrowWriter;
+    use delta_kernel_engine::arrow_data::ArrowEngineData;
+    use delta_kernel_engine::default::executor::tokio::TokioBackgroundExecutor;
+    use delta_kernel_engine::default::filesystem::ObjectStoreStorageHandler;
+    use delta_kernel_engine::default::DefaultEngine;
 
-    use crate::engine::arrow_data::ArrowEngineData;
-    use crate::engine::default::executor::tokio::TokioBackgroundExecutor;
-    use crate::engine::default::filesystem::ObjectStoreStorageHandler;
-    use crate::engine::default::DefaultEngine;
     use crate::engine::sync::SyncEngine;
     use crate::path::ParsedLogPath;
     use crate::utils::test_utils::string_array_to_engine_data;
     use test_utils::{add_commit, delta_path_for_version};
+
+    use serde_json::json;
 
     #[test]
     fn test_snapshot_read_metadata() {

@@ -381,16 +381,21 @@ fn generate_commit_info(
 mod tests {
     use super::*;
 
-    use crate::engine::arrow_data::ArrowEngineData;
-    use crate::engine::arrow_expression::ArrowEvaluationHandler;
     use crate::schema::MapType;
     use crate::{EvaluationHandler, JsonHandler, ParquetHandler, StorageHandler};
 
-    use crate::arrow::array::{MapArray, MapBuilder, MapFieldNames, StringArray, StringBuilder};
-    use crate::arrow::datatypes::{DataType as ArrowDataType, Field, Schema as ArrowSchema};
-    use crate::arrow::error::ArrowError;
-    use crate::arrow::json::writer::LineDelimitedWriter;
-    use crate::arrow::record_batch::RecordBatch;
+    use delta_kernel_engine::arrow_data::ArrowEngineData;
+    use delta_kernel_engine::arrow_expression::ArrowEvaluationHandler;
+
+    use delta_kernel_engine::arrow::array::{
+        MapArray, MapBuilder, MapFieldNames, StringArray, StringBuilder,
+    };
+    use delta_kernel_engine::arrow::datatypes::{
+        DataType as ArrowDataType, Field, Schema as ArrowSchema,
+    };
+    use delta_kernel_engine::arrow::error::ArrowError;
+    use delta_kernel_engine::arrow::json::writer::LineDelimitedWriter;
+    use delta_kernel_engine::arrow::record_batch::RecordBatch;
 
     struct ExprEngine(Arc<dyn EvaluationHandler>);
 

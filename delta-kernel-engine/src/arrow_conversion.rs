@@ -285,20 +285,18 @@ impl TryFromArrow<&ArrowDataType> for DataType {
 
 #[cfg(test)]
 mod tests {
-    use crate::arrow_conversion::ArrowField;
-    use crate::{
-        schema::{DataType, StructField},
-        DeltaResult,
-    };
+    use crate::arrow_conversion::{ArrowField, TryFromKernel};
+    use crate::EngineResult;
+    use delta_kernel::schema::{DataType, StructField};
     use std::collections::HashMap;
 
     #[test]
-    fn test_metadata_string_conversion() -> DeltaResult<()> {
+    fn test_metadata_string_conversion() -> EngineResult<()> {
         let mut metadata = HashMap::new();
         metadata.insert("description", "hello world".to_owned());
         let struct_field = StructField::not_null("name", DataType::STRING).with_metadata(metadata);
 
-        let arrow_field = ArrowField::try_from(&struct_field)?;
+        let arrow_field = ArrowField::from_kernel(&struct_field)?;
         let new_metadata = arrow_field.metadata();
 
         assert_eq!(

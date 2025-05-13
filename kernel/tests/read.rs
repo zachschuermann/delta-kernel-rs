@@ -16,7 +16,7 @@ use delta_kernel::scan::state::{transform_to_logical, DvInfo, Stats};
 use delta_kernel::scan::Scan;
 use delta_kernel::schema::{DataType, Schema};
 use delta_kernel::{Engine, FileMeta, Table};
-use delta_kernel_engine::arrow_conversion::arrow_schema_from_struct_type;
+use delta_kernel_engine::arrow_conversion::TryIntoArrow;
 use delta_kernel_engine::default::executor::tokio::TokioBackgroundExecutor;
 use delta_kernel_engine::default::DefaultEngine;
 
@@ -318,8 +318,7 @@ fn read_with_execute(
     scan: &Scan,
     expected: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let result_schema: ArrowSchemaRef =
-        Arc::new(arrow_schema_from_struct_type(scan.schema().as_ref())?);
+    let result_schema: ArrowSchemaRef = Arc::new(scan.schema().as_ref().into_arrow()?);
     let batches = read_scan(scan, engine)?;
 
     if expected.is_empty() {
@@ -362,8 +361,7 @@ fn read_with_scan_metadata(
     expected: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let global_state = scan.global_scan_state();
-    let result_schema: ArrowSchemaRef =
-        Arc::new(arrow_schema_from_struct_type(scan.schema().as_ref())?);
+    let result_schema: ArrowSchemaRef = Arc::new(scan.schema().as_ref().into_arrow()?);
     let scan_metadata = scan.scan_metadata(engine)?;
     let mut scan_files = vec![];
     for res in scan_metadata {

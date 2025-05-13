@@ -254,11 +254,8 @@ fn metadata_eq(
 #[cfg(test)]
 mod tests {
     use crate::arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Fields};
-
-    use crate::{
-        engine::ensure_data_types::ensure_data_types,
-        schema::{ArrayType, DataType, MapType, StructField},
-    };
+    use crate::ensure_data_types::ensure_data_types;
+    use delta_kernel::schema::{ArrayType, DataType, MapType, StructField};
 
     #[test]
     fn accepts_safe_decimal_casts() {

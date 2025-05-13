@@ -208,7 +208,7 @@ mod tests {
 
     use crate::default::executor::tokio::TokioBackgroundExecutor;
     use crate::default::DefaultEngine;
-    use crate::Engine as _;
+    use delta_kernel::Engine as _;
 
     use itertools::Itertools;
 
