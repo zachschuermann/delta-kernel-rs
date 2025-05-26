@@ -990,7 +990,7 @@ mod tests {
     use crate::engine::sync::SyncEngine;
     use crate::expressions::{column_expr, column_pred, Expression as Expr, Predicate as Pred};
     use crate::schema::{ColumnMetadataKey, PrimitiveType};
-    use crate::Table;
+    use crate::Snapshot;
 
     use super::*;
 
@@ -1190,8 +1190,7 @@ mod tests {
         let url = url::Url::from_directory_path(path).unwrap();
         let engine = SyncEngine::new();
 
-        let table = Table::new(url);
-        let snapshot = table.snapshot(&engine, None).unwrap();
+        let snapshot = Snapshot::try_new(url, &engine, None).unwrap();
         let scan = snapshot.into_scan_builder().build().unwrap();
         let files = get_files_for_scan(scan, &engine).unwrap();
         assert_eq!(files.len(), 1);
@@ -1208,8 +1207,7 @@ mod tests {
         let url = url::Url::from_directory_path(path).unwrap();
         let engine = Arc::new(SyncEngine::new());
 
-        let table = Table::new(url);
-        let snapshot = table.snapshot(engine.as_ref(), None).unwrap();
+        let snapshot = Snapshot::try_new(url, engine.as_ref(), None).unwrap();
         let scan = snapshot.into_scan_builder().build().unwrap();
         let files: Vec<ScanResult> = scan.execute(engine).unwrap().try_collect().unwrap();
 
@@ -1225,8 +1223,7 @@ mod tests {
         let url = url::Url::from_directory_path(path).unwrap();
         let engine = Arc::new(SyncEngine::new());
 
-        let table = Table::new(url);
-        let snapshot = table.snapshot(engine.as_ref(), None).unwrap();
+        let snapshot = Snapshot::try_new(url, engine.as_ref(), None).unwrap();
         let version = snapshot.version();
         let scan = snapshot.into_scan_builder().build().unwrap();
         let files: Vec<_> = scan
@@ -1260,8 +1257,7 @@ mod tests {
         let url = url::Url::from_directory_path(path).unwrap();
         let engine = Arc::new(SyncEngine::new());
 
-        let table = Table::new(url);
-        let snapshot = table.snapshot(engine.as_ref(), Some(0)).unwrap();
+        let snapshot = Snapshot::try_new(url.clone(), engine.as_ref(), Some(0)).unwrap();
         let scan = snapshot.into_scan_builder().build().unwrap();
         let files: Vec<_> = scan
             .scan_metadata(engine.as_ref())
@@ -1282,7 +1278,7 @@ mod tests {
             .into_iter()
             .map(|b| Box::new(ArrowEngineData::from(b)) as Box<dyn EngineData>)
             .collect();
-        let snapshot = table.snapshot(engine.as_ref(), Some(1)).unwrap();
+        let snapshot = Snapshot::try_new(url, engine.as_ref(), Some(1)).unwrap();
         let scan = snapshot.into_scan_builder().build().unwrap();
         let new_files: Vec<_> = scan
             .scan_metadata_from(engine.as_ref(), 0, files, None)
@@ -1351,8 +1347,7 @@ mod tests {
         let url = url::Url::from_directory_path(path.unwrap()).unwrap();
         let engine = SyncEngine::new();
 
-        let table = Table::new(url);
-        let snapshot = table.snapshot(&engine, None).unwrap();
+        let snapshot = Snapshot::try_new(url, &engine, None).unwrap();
         let scan = snapshot.into_scan_builder().build().unwrap();
         let data: Vec<_> = scan
             .replay_for_scan_metadata(&engine)
@@ -1372,8 +1367,7 @@ mod tests {
         let url = url::Url::from_directory_path(path.unwrap()).unwrap();
         let engine = Arc::new(SyncEngine::new());
 
-        let table = Table::new(url);
-        let snapshot = Arc::new(table.snapshot(engine.as_ref(), None).unwrap());
+        let snapshot = Arc::new(Snapshot::try_new(url, engine.as_ref(), None).unwrap());
 
         // No predicate pushdown attempted, so the one data file should be returned.
         //
@@ -1416,8 +1410,7 @@ mod tests {
         let url = url::Url::from_directory_path(path.unwrap()).unwrap();
         let engine = Arc::new(SyncEngine::new());
 
-        let table = Table::new(url);
-        let snapshot = Arc::new(table.snapshot(engine.as_ref(), None).unwrap());
+        let snapshot = Arc::new(Snapshot::try_new(url, engine.as_ref(), None).unwrap());
 
         // Predicate over a logically valid but physically missing column. No data files should be
         // returned because the column is inferred to be all-null.
@@ -1452,8 +1445,7 @@ mod tests {
         let url = url::Url::from_directory_path(path).unwrap();
         let engine = SyncEngine::new();
 
-        let table = Table::new(url);
-        let snapshot = table.snapshot(&engine, None)?;
+        let snapshot = Snapshot::try_new(url, &engine, None).unwrap();
         let scan = snapshot.into_scan_builder().build()?;
         let files = get_files_for_scan(scan, &engine)?;
         // test case:
