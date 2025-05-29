@@ -39,7 +39,7 @@ the `delta_kernel` crate as possible.
   -  datafusion
   -  duckdb's
   -  predominantly used during data skipping, to scan for `where x < 5` based on file skipping
-- struct DeltaLog/Segment/Snapshot/Replay
+- struct DeltaLog/Segment/ResolvedTable/Replay
   - generic over the above traits to allow consistent log interactions across table API implementations.
 
 ```mermaid
@@ -76,15 +76,15 @@ Delta Lake protocol..
 
 #### Arrow
 
-Sane defaults for the above traits with `RecordBatch` as the mode of interop between everything. 
+Sane defaults for the above traits with `RecordBatch` as the mode of interop between everything.
 This feature flag turns on the most sane default, parquet, json, some expression evaluator
 with arrow as its in-memory format.
 
 
 ```mermaid
 classDiagram
-    DeltaTable --> Snapshot : yields Snapshots
-    Snapshot --> Scan
+    DeltaTable --> ResolvedTable : yields ResolvedTables
+    ResolvedTable --> Scan
     Scan -->  ScanFileIterator
     ScanFileIterator -->  ScanDataIterator
 
@@ -94,12 +94,12 @@ classDiagram
     note for DeltaTable "Responsible for log storage"
     class DeltaTable {
         -Url location
-        get_latest_snapshot(StorageClient) Snapshot
+        get_latest_snapshot(StorageClient) ResolvedTable
         get_latest_version(StorageClient) uint64
     }
 
-    note for Snapshot "Responsible for log storage"
-    class Snapshot {
+    note for ResolvedTable "Responsible for log storage"
+    class ResolvedTable {
         +uint64 version
     }
 
@@ -111,5 +111,4 @@ classDiagram
     class StorageClient {
     }
 ```
-
 

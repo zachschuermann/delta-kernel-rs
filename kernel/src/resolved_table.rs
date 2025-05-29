@@ -29,24 +29,24 @@ pub(crate) const LAST_CHECKPOINT_FILE_NAME: &str = "_last_checkpoint";
 
 // TODO expose methods for accessing the files of a table (with file pruning).
 /// In-memory representation of a specific snapshot of a Delta table. While a `DeltaTable` exists
-/// throughout time, `Snapshot`s represent a view of a table at a specific point in time; they
+/// throughout time, `ResolvedTable`s represent a view of a table at a specific point in time; they
 /// have a defined schema (which may change over time for any given table), specific version, and
 /// frozen log segment.
 #[derive(PartialEq, Eq)]
-pub struct Snapshot {
+pub struct ResolvedTable {
     log_segment: LogSegment,
     table_configuration: TableConfiguration,
 }
 
-impl Drop for Snapshot {
+impl Drop for ResolvedTable {
     fn drop(&mut self) {
         debug!("Dropping snapshot");
     }
 }
 
-impl std::fmt::Debug for Snapshot {
+impl std::fmt::Debug for ResolvedTable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Snapshot")
+        f.debug_struct("ResolvedTable")
             .field("path", &self.log_segment.log_root.as_str())
             .field("version", &self.version())
             .field("metadata", &self.metadata())
@@ -54,7 +54,7 @@ impl std::fmt::Debug for Snapshot {
     }
 }
 
-impl Snapshot {
+impl ResolvedTable {
     fn new(log_segment: LogSegment, table_configuration: TableConfiguration) -> Self {
         Self {
             log_segment,
@@ -62,14 +62,14 @@ impl Snapshot {
         }
     }
 
-    /// Create a new [`Snapshot`] instance for the given version by parsing the given uri string.
+    /// Create a new [`ResolvedTable`] instance for the given version by parsing the given uri string.
     ///
     /// # Parameters
     ///
     /// - `table_root`: string-encoded URI pointing at the table root (where `_delta_log` folder is
     ///   located)
     /// - `engine`: Implementation of [`Engine`] apis.
-    /// - `version`: target version of the [`Snapshot`]. None will create a snapshot at the latest
+    /// - `version`: target version of the [`ResolvedTable`]. None will create a snapshot at the latest
     ///   version of the table.
     pub fn try_from_uri(
         uri: impl AsRef<str>,
@@ -80,13 +80,13 @@ impl Snapshot {
         Self::try_new(url, engine, version)
     }
 
-    /// Create a new [`Snapshot`] instance for the given version.
+    /// Create a new [`ResolvedTable`] instance for the given version.
     ///
     /// # Parameters
     ///
     /// - `table_root`: url pointing at the table root (where `_delta_log` folder is located)
     /// - `engine`: Implementation of [`Engine`] apis.
-    /// - `version`: target version of the [`Snapshot`]. None will create a snapshot at the latest
+    /// - `version`: target version of the [`ResolvedTable`]. None will create a snapshot at the latest
     ///   version of the table.
     pub fn try_new(
         table_root: Url,
@@ -105,8 +105,8 @@ impl Snapshot {
         Self::try_new_from_log_segment(table_root, log_segment, engine)
     }
 
-    /// Create a new [`Snapshot`] instance from an existing [`Snapshot`]. This is useful when you
-    /// already have a [`Snapshot`] lying around and want to do the minimal work to 'update' the
+    /// Create a new [`ResolvedTable`] instance from an existing [`ResolvedTable`]. This is useful when you
+    /// already have a [`ResolvedTable`] lying around and want to do the minimal work to 'update' the
     /// snapshot to a later version.
     ///
     /// We implement a simple heuristic:
@@ -121,22 +121,22 @@ impl Snapshot {
     ///
     /// # Parameters
     ///
-    /// - `existing_snapshot`: reference to an existing [`Snapshot`]
+    /// - `existing`: reference to an existing [`ResolvedTable`]
     /// - `engine`: Implementation of [`Engine`] apis.
-    /// - `version`: target version of the [`Snapshot`]. None will create a snapshot at the latest
+    /// - `version`: target version of the [`ResolvedTable`]. None will create a snapshot at the latest
     ///   version of the table.
     pub fn try_new_from(
-        existing_snapshot: Arc<Snapshot>,
+        existing: Arc<ResolvedTable>,
         engine: &dyn Engine,
         version: impl Into<Option<Version>>,
     ) -> DeltaResult<Arc<Self>> {
-        let old_log_segment = &existing_snapshot.log_segment;
-        let old_version = existing_snapshot.version();
+        let old_log_segment = &existing.log_segment;
+        let old_version = existing.version();
         let new_version = version.into();
         if let Some(new_version) = new_version {
             if new_version == old_version {
                 // Re-requesting the same version
-                return Ok(existing_snapshot.clone());
+                return Ok(existing.clone());
             }
             if new_version < old_version {
                 // Hint is too new: error since this is effectively an incorrect optimization
@@ -177,7 +177,7 @@ impl Snapshot {
                 }
                 _ => {
                     // No new commits, just return the same snapshot
-                    return Ok(existing_snapshot.clone());
+                    return Ok(existing.clone());
                 }
             }
         }
@@ -197,13 +197,13 @@ impl Snapshot {
         }
         if new_end_version == old_version {
             // No new commits, just return the same snapshot
-            return Ok(existing_snapshot.clone());
+            return Ok(existing.clone());
         }
 
         if new_log_segment.checkpoint_version.is_some() {
             // we have a checkpoint in the new LogSegment, just construct a new snapshot from that
             let snapshot = Self::try_new_from_log_segment(
-                existing_snapshot.table_root().clone(),
+                existing.table_root().clone(),
                 new_log_segment,
                 engine,
             );
@@ -230,7 +230,7 @@ impl Snapshot {
         // create a new snapshot by combining LogSegments and building a new TableConfiguration
         let (new_metadata, new_protocol) = new_log_segment.protocol_and_metadata(engine)?;
         let table_configuration = TableConfiguration::try_new_from(
-            existing_snapshot.table_configuration(),
+            existing.table_configuration(),
             new_metadata,
             new_protocol,
             new_log_segment.end_version,
@@ -263,13 +263,13 @@ impl Snapshot {
             log_root,
             new_version,
         )?;
-        Ok(Arc::new(Snapshot::new(
+        Ok(Arc::new(ResolvedTable::new(
             combined_log_segment,
             table_configuration,
         )))
     }
 
-    /// Create a new [`Snapshot`] instance.
+    /// Create a new [`ResolvedTable`] instance.
     pub(crate) fn try_new_from_log_segment(
         location: Url,
         log_segment: LogSegment,
@@ -302,35 +302,35 @@ impl Snapshot {
         self.table_configuration.table_root()
     }
 
-    /// Version of this `Snapshot` in the table.
+    /// Version of this `ResolvedTable` in the table.
     pub fn version(&self) -> Version {
         self.table_configuration().version()
     }
 
-    /// Table [`type@Schema`] at this `Snapshot`s version.
+    /// Table [`type@Schema`] at this `ResolvedTable`s version.
     pub fn schema(&self) -> SchemaRef {
         self.table_configuration.schema()
     }
 
-    /// Table [`Metadata`] at this `Snapshot`s version.
+    /// Table [`Metadata`] at this `ResolvedTable`s version.
     #[internal_api]
     pub(crate) fn metadata(&self) -> &Metadata {
         self.table_configuration.metadata()
     }
 
-    /// Table [`Protocol`] at this `Snapshot`s version.
+    /// Table [`Protocol`] at this `ResolvedTable`s version.
     #[allow(dead_code)]
     #[internal_api]
     pub(crate) fn protocol(&self) -> &Protocol {
         self.table_configuration.protocol()
     }
 
-    /// Get the [`TableProperties`] for this [`Snapshot`].
+    /// Get the [`TableProperties`] for this [`ResolvedTable`].
     pub fn table_properties(&self) -> &TableProperties {
         self.table_configuration().table_properties()
     }
 
-    /// Get the [`TableConfiguration`] for this [`Snapshot`].
+    /// Get the [`TableConfiguration`] for this [`ResolvedTable`].
     #[internal_api]
     pub(crate) fn table_configuration(&self) -> &TableConfiguration {
         &self.table_configuration
@@ -338,22 +338,22 @@ impl Snapshot {
 
     /// Get the [column mapping
     /// mode](https://github.com/delta-io/delta/blob/master/PROTOCOL.md#column-mapping) at this
-    /// `Snapshot`s version.
+    /// `ResolvedTable`s version.
     pub fn column_mapping_mode(&self) -> ColumnMappingMode {
         self.table_configuration.column_mapping_mode()
     }
 
-    /// Create a [`ScanBuilder`] for an `Arc<Snapshot>`.
+    /// Create a [`ScanBuilder`] for an `Arc<ResolvedTable>`.
     pub fn scan_builder(self: Arc<Self>) -> ScanBuilder {
         ScanBuilder::new(self)
     }
 
-    /// Consume this `Snapshot` to create a [`ScanBuilder`]
+    /// Consume this `ResolvedTable` to create a [`ScanBuilder`]
     pub fn into_scan_builder(self) -> ScanBuilder {
         ScanBuilder::new(self)
     }
 
-    /// Create a [`Transaction`] for this `Arc<Snapshot>`.
+    /// Create a [`Transaction`] for this `Arc<ResolvedTable>`.
     pub fn transaction(self: Arc<Self>) -> DeltaResult<Transaction> {
         Transaction::try_new(self)
     }
@@ -470,7 +470,7 @@ mod tests {
         let url = url::Url::from_directory_path(path).unwrap();
 
         let engine = SyncEngine::new();
-        let snapshot = Snapshot::try_new(url, &engine, Some(1)).unwrap();
+        let snapshot = ResolvedTable::try_new(url, &engine, Some(1)).unwrap();
 
         let expected =
             Protocol::try_new(3, 7, Some(["deletionVectors"]), Some(["deletionVectors"])).unwrap();
@@ -488,7 +488,7 @@ mod tests {
         let url = url::Url::from_directory_path(path).unwrap();
 
         let engine = SyncEngine::new();
-        let snapshot = Snapshot::try_new(url, &engine, None).unwrap();
+        let snapshot = ResolvedTable::try_new(url, &engine, None).unwrap();
 
         let expected =
             Protocol::try_new(3, 7, Some(["deletionVectors"]), Some(["deletionVectors"])).unwrap();
@@ -509,7 +509,7 @@ mod tests {
         add_commit(store, version, commit_data).await.unwrap();
     }
 
-    // interesting cases for testing Snapshot::new_from:
+    // interesting cases for testing ResolvedTable::new_from:
     // 1. new version < existing version
     // 2. new version == existing version
     // 3. new version > existing version AND
@@ -527,20 +527,20 @@ mod tests {
         let url = url::Url::from_directory_path(path).unwrap();
 
         let engine = SyncEngine::new();
-        let old_snapshot = Arc::new(Snapshot::try_new(url.clone(), &engine, Some(1)).unwrap());
+        let old_snapshot = Arc::new(ResolvedTable::try_new(url.clone(), &engine, Some(1)).unwrap());
         // 1. new version < existing version: error
-        let snapshot_res = Snapshot::try_new_from(old_snapshot.clone(), &engine, Some(0));
+        let snapshot_res = ResolvedTable::try_new_from(old_snapshot.clone(), &engine, Some(0));
         assert!(matches!(
             snapshot_res,
             Err(Error::Generic(msg)) if msg == "Requested snapshot version 0 is older than snapshot hint version 1"
         ));
 
         // 2. new version == existing version
-        let snapshot = Snapshot::try_new_from(old_snapshot.clone(), &engine, Some(1)).unwrap();
+        let snapshot = ResolvedTable::try_new_from(old_snapshot.clone(), &engine, Some(1)).unwrap();
         let expected = old_snapshot.clone();
         assert_eq!(snapshot, expected);
 
-        // tests Snapshot::new_from by:
+        // tests ResolvedTable::new_from by:
         // 1. creating a snapshot with new API for commits 0..=2 (based on old snapshot at 0)
         // 2. comparing with a snapshot created directly at version 2
         //
@@ -552,9 +552,9 @@ mod tests {
         fn test_new_from(store: Arc<InMemory>) -> DeltaResult<()> {
             let url = Url::parse("memory:///")?;
             let engine = DefaultEngine::new(store, Arc::new(TokioBackgroundExecutor::new()));
-            let base_snapshot = Arc::new(Snapshot::try_new(url.clone(), &engine, Some(0))?);
-            let snapshot = Snapshot::try_new_from(base_snapshot.clone(), &engine, Some(1))?;
-            let expected = Snapshot::try_new(url.clone(), &engine, Some(1))?;
+            let base_snapshot = Arc::new(ResolvedTable::try_new(url.clone(), &engine, Some(0))?);
+            let snapshot = ResolvedTable::try_new_from(base_snapshot.clone(), &engine, Some(1))?;
+            let expected = ResolvedTable::try_new(url.clone(), &engine, Some(1))?;
             assert_eq!(snapshot, expected.into());
             Ok(())
         }
@@ -599,13 +599,13 @@ mod tests {
             Arc::new(store.fork()),
             Arc::new(TokioBackgroundExecutor::new()),
         );
-        let base_snapshot = Arc::new(Snapshot::try_new(url.clone(), &engine, Some(0))?);
-        let snapshot = Snapshot::try_new_from(base_snapshot.clone(), &engine, None)?;
-        let expected = Snapshot::try_new(url.clone(), &engine, Some(0))?;
+        let base_snapshot = Arc::new(ResolvedTable::try_new(url.clone(), &engine, Some(0))?);
+        let snapshot = ResolvedTable::try_new_from(base_snapshot.clone(), &engine, None)?;
+        let expected = ResolvedTable::try_new(url.clone(), &engine, Some(0))?;
         assert_eq!(snapshot, expected.into());
         // version exceeds latest version of the table = err
         assert!(matches!(
-            Snapshot::try_new_from(base_snapshot.clone(), &engine, Some(1)),
+            ResolvedTable::try_new_from(base_snapshot.clone(), &engine, Some(1)),
             Err(Error::Generic(msg)) if msg == "Requested snapshot version 1 is newer than the latest version 0"
         ));
 
@@ -668,9 +668,9 @@ mod tests {
         // new commits AND request version > end of log
         let url = Url::parse("memory:///")?;
         let engine = DefaultEngine::new(store_3c_i, Arc::new(TokioBackgroundExecutor::new()));
-        let base_snapshot = Arc::new(Snapshot::try_new(url.clone(), &engine, Some(0))?);
+        let base_snapshot = Arc::new(ResolvedTable::try_new(url.clone(), &engine, Some(0))?);
         assert!(matches!(
-            Snapshot::try_new_from(base_snapshot.clone(), &engine, Some(2)),
+            ResolvedTable::try_new_from(base_snapshot.clone(), &engine, Some(2)),
             Err(Error::Generic(msg)) if msg == "LogSegment end version 1 not the same as the specified end version 2"
         ));
 
@@ -775,11 +775,11 @@ mod tests {
         store.put(&path, crc.to_string().into()).await?;
 
         // base snapshot is at version 0
-        let base_snapshot = Arc::new(Snapshot::try_new(url.clone(), &engine, Some(0))?);
+        let base_snapshot = Arc::new(ResolvedTable::try_new(url.clone(), &engine, Some(0))?);
 
         // first test: no new crc
-        let snapshot = Snapshot::try_new_from(base_snapshot.clone(), &engine, Some(1))?;
-        let expected = Snapshot::try_new(url.clone(), &engine, Some(1))?;
+        let snapshot = ResolvedTable::try_new_from(base_snapshot.clone(), &engine, Some(1))?;
+        let expected = ResolvedTable::try_new(url.clone(), &engine, Some(1))?;
         assert_eq!(snapshot, expected.into());
         assert_eq!(
             snapshot
@@ -803,8 +803,8 @@ mod tests {
             "protocol": protocol(1, 2),
         });
         store.put(&path, crc.to_string().into()).await?;
-        let snapshot = Snapshot::try_new_from(base_snapshot.clone(), &engine, Some(1))?;
-        let expected = Snapshot::try_new(url.clone(), &engine, Some(1))?;
+        let snapshot = ResolvedTable::try_new_from(base_snapshot.clone(), &engine, Some(1))?;
+        let expected = ResolvedTable::try_new(url.clone(), &engine, Some(1))?;
         assert_eq!(snapshot, expected.into());
         assert_eq!(
             snapshot
@@ -880,7 +880,7 @@ mod tests {
         .unwrap();
         let location = url::Url::from_directory_path(path).unwrap();
         let engine = SyncEngine::new();
-        let snapshot = Snapshot::try_new(location, &engine, None).unwrap();
+        let snapshot = ResolvedTable::try_new(location, &engine, None).unwrap();
 
         assert_eq!(snapshot.log_segment.checkpoint_parts.len(), 1);
         assert_eq!(
@@ -987,7 +987,7 @@ mod tests {
         .join("\n");
         add_commit(store.as_ref(), 1, commit).await.unwrap();
 
-        let snapshot = Arc::new(Snapshot::try_new(url.clone(), &engine, None)?);
+        let snapshot = Arc::new(ResolvedTable::try_new(url.clone(), &engine, None)?);
 
         assert_eq!(snapshot.get_domain_metadata("domain1", &engine)?, None);
         assert_eq!(

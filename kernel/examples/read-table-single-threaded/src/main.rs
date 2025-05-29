@@ -9,7 +9,7 @@ use delta_kernel::engine::arrow_data::ArrowEngineData;
 use delta_kernel::engine::default::executor::tokio::TokioBackgroundExecutor;
 use delta_kernel::engine::default::DefaultEngine;
 use delta_kernel::schema::Schema;
-use delta_kernel::{DeltaResult, Snapshot};
+use delta_kernel::{DeltaResult, ResolvedTable};
 
 use clap::Parser;
 use itertools::Itertools;
@@ -71,7 +71,7 @@ fn try_main() -> DeltaResult<()> {
         Arc::new(TokioBackgroundExecutor::new()),
     )?);
 
-    let snapshot = Snapshot::try_new(url, engine.as_ref(), None)?;
+    let snapshot = ResolvedTable::try_new(url, engine.as_ref(), None)?;
     println!("Reading {}", snapshot.table_root());
 
     if cli.schema_only {

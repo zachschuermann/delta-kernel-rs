@@ -2,7 +2,7 @@ use delta_kernel::arrow::array::RecordBatch;
 use delta_kernel::engine::default::DefaultEngine;
 
 use delta_kernel::engine::arrow_data::ArrowEngineData;
-use delta_kernel::{DeltaResult, Snapshot};
+use delta_kernel::{DeltaResult, ResolvedTable};
 
 mod common;
 use common::{load_test_data, read_scan};
@@ -16,7 +16,7 @@ fn read_v2_checkpoint_table(test_name: impl AsRef<str>) -> DeltaResult<Vec<Recor
     let test_path = test_dir.path().join(test_name.as_ref());
 
     let engine = DefaultEngine::new_local();
-    let snapshot = Snapshot::try_from_uri(
+    let snapshot = ResolvedTable::try_from_uri(
         test_path.to_str().expect("table path to string"),
         engine.as_ref(),
         None,

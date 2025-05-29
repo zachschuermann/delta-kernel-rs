@@ -9,7 +9,7 @@
 
 use delta_kernel::engine::default::executor::tokio::TokioBackgroundExecutor;
 use delta_kernel::engine::default::DefaultEngine;
-use delta_kernel::Snapshot;
+use delta_kernel::ResolvedTable;
 use hdfs_native::{Client, WriteOptions};
 use hdfs_native_object_store::minidfs::MiniDfs;
 use std::collections::HashSet;
@@ -73,7 +73,7 @@ async fn read_table_version_hdfs() -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(TokioBackgroundExecutor::new()),
     )?;
 
-    let snapshot = Snapshot::try_new(url, &engine, None)?;
+    let snapshot = ResolvedTable::try_new(url, &engine, None)?;
     assert_eq!(snapshot.version(), 1);
 
     Ok(())

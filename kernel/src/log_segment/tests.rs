@@ -19,14 +19,14 @@ use crate::engine::sync::SyncEngine;
 use crate::log_segment::{ListedLogFiles, LogSegment};
 use crate::parquet::arrow::ArrowWriter;
 use crate::path::{LogPathFileType, ParsedLogPath};
+use crate::resolved_table::LastCheckpointHint;
 use crate::scan::test_utils::{
     add_batch_simple, add_batch_with_remove, sidecar_batch_with_given_paths,
 };
-use crate::snapshot::LastCheckpointHint;
 use crate::utils::test_utils::{assert_batch_matches, Action};
 use crate::{
-    DeltaResult, Engine as _, EngineData, Expression, FileMeta, PredicateRef, RowVisitor, Snapshot,
-    StorageHandler,
+    DeltaResult, Engine as _, EngineData, Expression, FileMeta, PredicateRef, ResolvedTable,
+    RowVisitor, StorageHandler,
 };
 use test_utils::{compacted_log_path_for_versions, delta_path_for_version};
 
@@ -65,7 +65,7 @@ fn test_replay_for_metadata() {
     let url = url::Url::from_directory_path(path.unwrap()).unwrap();
     let engine = SyncEngine::new();
 
-    let snapshot = Snapshot::try_new(url, &engine, None).unwrap();
+    let snapshot = ResolvedTable::try_new(url, &engine, None).unwrap();
     let data: Vec<_> = snapshot
         .log_segment()
         .replay_for_metadata(&engine)
@@ -511,7 +511,7 @@ fn build_snapshot_with_bad_checkpoint_hint_fails() {
 
 #[test]
 fn build_snapshot_with_missing_checkpoint_part_no_hint() {
-    // Part 2 of 3 is missing from checkpoint 5. The Snapshot should be made of checkpoint
+    // Part 2 of 3 is missing from checkpoint 5. The ResolvedTable should be made of checkpoint
     // number 3 and commit files 4 to 7.
     let (storage, log_root) = build_log_with_paths_and_checkpoint(
         &[
@@ -548,7 +548,7 @@ fn build_snapshot_with_missing_checkpoint_part_no_hint() {
 #[test]
 fn build_snapshot_with_out_of_date_last_checkpoint_and_incomplete_recent_checkpoint() {
     // When the _last_checkpoint is out of date and the most recent checkpoint is incomplete, the
-    // Snapshot should be made of the most recent complete checkpoint and the commit files that
+    // ResolvedTable should be made of the most recent complete checkpoint and the commit files that
     // follow it.
     let checkpoint_metadata = LastCheckpointHint {
         version: 3,

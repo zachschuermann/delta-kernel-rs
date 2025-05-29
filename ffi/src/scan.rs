@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::{Arc, Mutex};
 
+use delta_kernel::resolved_table::ResolvedTable;
 use delta_kernel::scan::state::{DvInfo, GlobalScanState};
 use delta_kernel::scan::{Scan, ScanMetadata};
-use delta_kernel::snapshot::Snapshot;
 use delta_kernel::{DeltaResult, Error, Expression, ExpressionRef};
 use delta_kernel_ffi_macros::handle_descriptor;
 use tracing::debug;
@@ -17,7 +17,7 @@ use crate::expressions::SharedExpression;
 use crate::{
     kernel_string_slice, AllocateStringFn, ExternEngine, ExternResult, IntoExternResult,
     KernelBoolSlice, KernelRowIndexArray, KernelStringSlice, NullableCvoid, SharedExternEngine,
-    SharedSchema, SharedSnapshot, TryFromStringSlice,
+    SharedResolvedTable, SharedSchema, TryFromStringSlice,
 };
 
 use super::handle::Handle;
@@ -94,7 +94,7 @@ pub unsafe extern "C" fn free_scan(scan: Handle<SharedScan>) {
 /// Caller is responsible for passing a valid snapshot pointer, and engine pointer
 #[no_mangle]
 pub unsafe extern "C" fn scan(
-    snapshot: Handle<SharedSnapshot>,
+    snapshot: Handle<SharedResolvedTable>,
     engine: Handle<SharedExternEngine>,
     predicate: Option<&mut EnginePredicate>,
 ) -> ExternResult<Handle<SharedScan>> {
@@ -103,7 +103,7 @@ pub unsafe extern "C" fn scan(
 }
 
 fn scan_impl(
-    snapshot: Arc<Snapshot>,
+    snapshot: Arc<ResolvedTable>,
     predicate: Option<&mut EnginePredicate>,
 ) -> DeltaResult<Handle<SharedScan>> {
     let mut scan_builder = snapshot.scan_builder();

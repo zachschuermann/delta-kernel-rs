@@ -3,7 +3,7 @@
 /// Since each new `.rs` file in this directory results in increased build and link time, it is
 /// important to only add new files if absolutely necessary for code readability or test
 /// performance.
-use delta_kernel::snapshot::LastCheckpointHint;
+use delta_kernel::resolved_table::LastCheckpointHint;
 
 #[test]
 fn test_checkpoint_serde() {
@@ -41,7 +41,7 @@ async fn test_read_table_with_checkpoint() {
     let engine = Arc::new(
         DefaultEngine::try_new(&location, HashMap::<String, String>::new()).unwrap(),
     );
-    let snapshot = Snapshot::try_new(location, engine, None)
+    let snapshot = ResolvedTable::try_new(location, engine, None)
         .await
         .unwrap();
 

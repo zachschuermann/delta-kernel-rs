@@ -1,6 +1,6 @@
 //! This module implements the API for writing single-file checkpoints.
 //!
-//! The entrypoint for this API is [`Snapshot::checkpoint`].
+//! The entrypoint for this API is [`ResolvedTable::checkpoint`].
 //!
 //! ## Checkpoint Types and Selection Logic
 //! This API supports two checkpoint types, selected based on table features:
@@ -22,7 +22,7 @@
 //!
 //! The following steps outline the process of creating a checkpoint:
 //!
-//! 1. Create a [`CheckpointWriter`] using [`Snapshot::checkpoint`]
+//! 1. Create a [`CheckpointWriter`] using [`ResolvedTable::checkpoint`]
 //! 2. Get the checkpoint path from [`CheckpointWriter::checkpoint_path`]
 //! 2. Get the checkpoint data from [`CheckpointWriter::checkpoint_data`]
 //! 3. Write the data to the path in object storage (engine-specific)
@@ -34,7 +34,7 @@
 //! # use delta_kernel::checkpoint::CheckpointDataIterator;
 //! # use delta_kernel::checkpoint::CheckpointWriter;
 //! # use delta_kernel::Engine;
-//! # use delta_kernel::Snapshot;
+//! # use delta_kernel::ResolvedTable;
 //! # use delta_kernel::DeltaResult;
 //! # use delta_kernel::Error;
 //! # use delta_kernel::FileMeta;
@@ -46,7 +46,7 @@
 //! let engine: &dyn Engine = todo!(); /* create engine instance */
 //!
 //! // Create a snapshot for the table at the version you want to checkpoint (None = latest)
-//! let snapshot = Arc::new(Snapshot::try_from_uri("./tests/data/app-txn-no-checkpoint", engine, None)?);
+//! let snapshot = Arc::new(ResolvedTable::try_from_uri("./tests/data/app-txn-no-checkpoint", engine, None)?);
 //!
 //! // Create a checkpoint writer from the snapshot
 //! let mut writer = snapshot.checkpoint()?;
@@ -77,7 +77,7 @@
 //! in the future, we can revisit this decision.
 //!
 //! [`CheckpointMetadata`]: crate::actions::CheckpointMetadata
-//! [`LastCheckpointHint`]: crate::snapshot::LastCheckpointHint
+//! [`LastCheckpointHint`]: crate::resolved_table::LastCheckpointHint
 // Future extensions:
 // - TODO(#837): Multi-file V2 checkpoints are not supported yet. The API is designed to be extensible for future
 //   multi-file support, but the current implementation only supports single-file checkpoints.
@@ -92,8 +92,8 @@ use crate::engine_data::FilteredEngineData;
 use crate::expressions::Scalar;
 use crate::log_replay::LogReplayProcessor;
 use crate::path::ParsedLogPath;
+use crate::resolved_table::{ResolvedTable, LAST_CHECKPOINT_FILE_NAME};
 use crate::schema::{DataType, SchemaRef, StructField, StructType, ToSchema as _};
-use crate::snapshot::{Snapshot, LAST_CHECKPOINT_FILE_NAME};
 use crate::{DeltaResult, Engine, EngineData, Error, EvaluationHandlerExtension, FileMeta};
 use log_replay::{CheckpointBatch, CheckpointLogReplayProcessor};
 
@@ -196,7 +196,7 @@ impl Iterator for CheckpointDataIterator {
 /// See the [module-level documentation](self) for the complete checkpoint workflow
 pub struct CheckpointWriter {
     /// Reference to the snapshot (i.e. version) of the table being checkpointed
-    pub(crate) snapshot: Arc<Snapshot>,
+    pub(crate) snapshot: Arc<ResolvedTable>,
 
     /// The version of the snapshot being checkpointed.
     /// Note: Although the version is stored as a u64 in the snapshot, it is stored as an i64
@@ -206,7 +206,7 @@ pub struct CheckpointWriter {
 
 impl CheckpointWriter {
     /// Creates a new [`CheckpointWriter`] for the given snapshot.
-    pub(crate) fn try_new(snapshot: Arc<Snapshot>) -> DeltaResult<Self> {
+    pub(crate) fn try_new(snapshot: Arc<ResolvedTable>) -> DeltaResult<Self> {
         let version = i64::try_from(snapshot.version()).map_err(|e| {
             Error::CheckpointWrite(format!(
                 "Failed to convert checkpoint version from u64 {} to i64: {}",

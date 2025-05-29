@@ -13,7 +13,7 @@ use delta_kernel::expressions::ColumnName;
 use delta_kernel::scan::state::{DvInfo, Stats};
 use delta_kernel::scan::ScanBuilder;
 use delta_kernel::schema::{ColumnNamesAndTypes, DataType};
-use delta_kernel::{DeltaResult, Error, ExpressionRef, Snapshot};
+use delta_kernel::{DeltaResult, Error, ExpressionRef, ResolvedTable};
 
 use std::collections::HashMap;
 use std::process::ExitCode;
@@ -189,7 +189,7 @@ fn try_main() -> DeltaResult<()> {
         Arc::new(TokioBackgroundExecutor::new()),
     )?;
 
-    let snapshot = Snapshot::try_new(url, &engine, None)?;
+    let snapshot = ResolvedTable::try_new(url, &engine, None)?;
     println!("Reading {}", snapshot.table_root());
 
     match cli.command {

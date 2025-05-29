@@ -8,7 +8,7 @@ use futures::stream::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use delta_kernel::{Engine, Error, Snapshot, Version};
+use delta_kernel::{Engine, Error, ResolvedTable, Version};
 
 #[derive(Debug, thiserror::Error)]
 pub enum AssertionError {
@@ -78,7 +78,7 @@ impl TestCaseInfo {
     fn assert_snapshot_meta(
         &self,
         case: &TableVersionMetaData,
-        snapshot: &Snapshot,
+        snapshot: &ResolvedTable,
     ) -> TestResult<()> {
         assert_eq!(snapshot.version(), case.version);
 
@@ -103,12 +103,12 @@ impl TestCaseInfo {
         let engine = engine.as_ref();
         let (latest, versions) = self.versions().await?;
 
-        let snapshot = Snapshot::try_new(self.table_root()?, engine, None)?;
+        let snapshot = ResolvedTable::try_new(self.table_root()?, engine, None)?;
         self.assert_snapshot_meta(&latest, &snapshot)?;
 
         for table_version in versions {
             let snapshot =
-                Snapshot::try_new(self.table_root()?, engine, Some(table_version.version))?;
+                ResolvedTable::try_new(self.table_root()?, engine, Some(table_version.version))?;
             self.assert_snapshot_meta(&table_version, &snapshot)?;
         }
 

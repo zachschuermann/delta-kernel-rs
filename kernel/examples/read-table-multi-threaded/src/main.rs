@@ -13,7 +13,7 @@ use delta_kernel::engine::default::executor::tokio::TokioBackgroundExecutor;
 use delta_kernel::engine::default::DefaultEngine;
 use delta_kernel::scan::state::{transform_to_logical, DvInfo, GlobalScanState, Stats};
 use delta_kernel::schema::Schema;
-use delta_kernel::{DeltaResult, Engine, EngineData, ExpressionRef, FileMeta, Snapshot};
+use delta_kernel::{DeltaResult, Engine, EngineData, ExpressionRef, FileMeta, ResolvedTable};
 
 use clap::Parser;
 use url::Url;
@@ -123,7 +123,7 @@ fn try_main() -> DeltaResult<()> {
     }
     let engine = DefaultEngine::try_new(&url, options, Arc::new(TokioBackgroundExecutor::new()))?;
 
-    let snapshot = Snapshot::try_new(url, &engine, None)?;
+    let snapshot = ResolvedTable::try_new(url, &engine, None)?;
     println!("Reading {}", snapshot.table_root());
 
     // process the columns requested and build a schema from them

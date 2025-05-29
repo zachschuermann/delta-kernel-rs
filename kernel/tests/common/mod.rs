@@ -8,7 +8,7 @@ use url::Url;
 
 use crate::ArrowEngineData;
 use delta_kernel::scan::Scan;
-use delta_kernel::{DeltaResult, Engine, EngineData, Snapshot};
+use delta_kernel::{DeltaResult, Engine, EngineData, ResolvedTable};
 
 #[macro_export]
 macro_rules! sort_lines {
@@ -69,7 +69,7 @@ pub(crate) fn test_read(
     url: Url,
     engine: Arc<dyn Engine>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let snapshot = Snapshot::try_new(url, engine.as_ref(), None)?;
+    let snapshot = ResolvedTable::try_new(url, engine.as_ref(), None)?;
     let scan = snapshot.into_scan_builder().build()?;
     let batches = read_scan(&scan, engine)?;
     let formatted = pretty_format_batches(&batches).unwrap().to_string();

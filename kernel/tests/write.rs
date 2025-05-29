@@ -23,7 +23,7 @@ use delta_kernel::engine::default::executor::tokio::TokioBackgroundExecutor;
 use delta_kernel::engine::default::DefaultEngine;
 use delta_kernel::schema::{DataType, SchemaRef, StructField, StructType};
 use delta_kernel::Error as KernelError;
-use delta_kernel::{DeltaResult, Snapshot};
+use delta_kernel::{DeltaResult, ResolvedTable};
 
 mod common;
 use common::test_read;
@@ -211,7 +211,7 @@ async fn test_commit_info() -> Result<(), Box<dyn std::error::Error>> {
     for (url, engine, store, table_name) in setup_tables(schema, &[]).await? {
         let commit_info = new_commit_info()?;
 
-        let snapshot = Arc::new(Snapshot::try_new(url, &engine, None)?);
+        let snapshot = Arc::new(ResolvedTable::try_new(url, &engine, None)?);
         let txn = snapshot.transaction()?.with_commit_info(commit_info);
 
         // commit!
@@ -258,7 +258,7 @@ async fn test_empty_commit() -> Result<(), Box<dyn std::error::Error>> {
     )]));
 
     for (url, engine, _store, _table_name) in setup_tables(schema, &[]).await? {
-        let snapshot = Arc::new(Snapshot::try_new(url, &engine, None)?);
+        let snapshot = Arc::new(ResolvedTable::try_new(url, &engine, None)?);
         assert!(matches!(
             snapshot.transaction()?.commit(&engine).unwrap_err(),
             KernelError::MissingCommitInfo
@@ -282,7 +282,7 @@ async fn test_invalid_commit_info() -> Result<(), Box<dyn std::error::Error>> {
         let commit_info_schema = Arc::new(ArrowSchema::empty());
         let commit_info_batch = RecordBatch::new_empty(commit_info_schema.clone());
         assert!(commit_info_batch.num_rows() == 0);
-        let snapshot = Arc::new(Snapshot::try_new(url, &engine, None)?);
+        let snapshot = Arc::new(ResolvedTable::try_new(url, &engine, None)?);
         let txn = snapshot
             .clone()
             .transaction()?
@@ -391,7 +391,7 @@ async fn test_append() -> Result<(), Box<dyn std::error::Error>> {
     for (url, engine, store, table_name) in setup_tables(schema.clone(), &[]).await? {
         let commit_info = new_commit_info()?;
 
-        let snapshot = Arc::new(Snapshot::try_new(url.clone(), &engine, None)?);
+        let snapshot = Arc::new(ResolvedTable::try_new(url.clone(), &engine, None)?);
         let mut txn = snapshot
             .clone()
             .transaction()?
@@ -527,7 +527,7 @@ async fn test_append_partitioned() -> Result<(), Box<dyn std::error::Error>> {
     {
         let commit_info = new_commit_info()?;
 
-        let snapshot = Arc::new(Snapshot::try_new(url.clone(), &engine, None)?);
+        let snapshot = Arc::new(ResolvedTable::try_new(url.clone(), &engine, None)?);
         let mut txn = snapshot
             .clone()
             .transaction()?
@@ -669,7 +669,7 @@ async fn test_append_invalid_schema() -> Result<(), Box<dyn std::error::Error>> 
     for (url, engine, _store, _table_name) in setup_tables(table_schema, &[]).await? {
         let commit_info = new_commit_info()?;
 
-        let snapshot = Arc::new(Snapshot::try_new(url, &engine, None)?);
+        let snapshot = Arc::new(ResolvedTable::try_new(url, &engine, None)?);
         let txn = snapshot.transaction()?.with_commit_info(commit_info);
 
         // create two new arrow record batches to append
@@ -725,7 +725,7 @@ async fn test_write_txn_actions() -> Result<(), Box<dyn std::error::Error>> {
 
     for (url, engine, store, table_name) in setup_tables(schema, &[]).await? {
         let commit_info = new_commit_info()?;
-        let snapshot = Arc::new(Snapshot::try_new(url.clone(), &engine, None)?);
+        let snapshot = Arc::new(ResolvedTable::try_new(url.clone(), &engine, None)?);
 
         // can't have duplicate app_id in same transaction
         assert!(matches!(
@@ -748,7 +748,7 @@ async fn test_write_txn_actions() -> Result<(), Box<dyn std::error::Error>> {
         // commit!
         txn.commit(&engine)?;
 
-        let snapshot = Arc::new(Snapshot::try_new(url, &engine, None)?);
+        let snapshot = Arc::new(ResolvedTable::try_new(url, &engine, None)?);
         assert_eq!(
             snapshot.clone().get_app_id_version("app_id1", &engine)?,
             Some(1)

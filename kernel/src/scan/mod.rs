@@ -20,13 +20,13 @@ use crate::expressions::{ColumnName, Expression, ExpressionRef, Predicate, Predi
 use crate::kernel_predicates::{DefaultKernelPredicateEvaluator, EmptyColumnResolver};
 use crate::log_replay::HasSelectionVector;
 use crate::log_segment::{ListedLogFiles, LogSegment};
+use crate::resolved_table::ResolvedTable;
 use crate::scan::state::{DvInfo, Stats};
 use crate::schema::ToSchema as _;
 use crate::schema::{
     ArrayType, DataType, MapType, PrimitiveType, Schema, SchemaRef, SchemaTransform, StructField,
     StructType,
 };
-use crate::snapshot::Snapshot;
 use crate::table_features::ColumnMappingMode;
 use crate::{DeltaResult, Engine, EngineData, Error, FileMeta, Version};
 
@@ -44,7 +44,7 @@ static CHECKPOINT_READ_SCHEMA: LazyLock<SchemaRef> =
 
 /// Builder to scan a snapshot of a table.
 pub struct ScanBuilder {
-    snapshot: Arc<Snapshot>,
+    snapshot: Arc<ResolvedTable>,
     schema: Option<SchemaRef>,
     predicate: Option<PredicateRef>,
 }
@@ -60,7 +60,7 @@ impl std::fmt::Debug for ScanBuilder {
 
 impl ScanBuilder {
     /// Create a new [`ScanBuilder`] instance.
-    pub fn new(snapshot: impl Into<Arc<Snapshot>>) -> Self {
+    pub fn new(snapshot: impl Into<Arc<ResolvedTable>>) -> Self {
         Self {
             snapshot: snapshot.into(),
             schema: None,
@@ -68,19 +68,19 @@ impl ScanBuilder {
         }
     }
 
-    /// Provide [`Schema`] for columns to select from the [`Snapshot`].
+    /// Provide [`Schema`] for columns to select from the [`ResolvedTable`].
     ///
     /// A table with columns `[a, b, c]` could have a scan which reads only the first
     /// two columns by using the schema `[a, b]`.
     ///
     /// [`Schema`]: crate::schema::Schema
-    /// [`Snapshot`]: crate::snapshot::Snapshot
+    /// [`ResolvedTable`]: crate::resolved_table::ResolvedTable
     pub fn with_schema(mut self, schema: SchemaRef) -> Self {
         self.schema = Some(schema);
         self
     }
 
-    /// Optionally provide a [`SchemaRef`] for columns to select from the [`Snapshot`]. See
+    /// Optionally provide a [`SchemaRef`] for columns to select from the [`ResolvedTable`]. See
     /// [`ScanBuilder::with_schema`] for details. If `schema_opt` is `None` this is a no-op.
     pub fn with_schema_opt(self, schema_opt: Option<SchemaRef>) -> Self {
         match schema_opt {
@@ -379,7 +379,7 @@ impl HasSelectionVector for ScanMetadata {
 /// The result of building a scan over a table. This can be used to get the actual data from
 /// scanning the table.
 pub struct Scan {
-    snapshot: Arc<Snapshot>,
+    snapshot: Arc<ResolvedTable>,
     logical_schema: SchemaRef,
     physical_schema: SchemaRef,
     physical_predicate: PhysicalPredicate,
@@ -990,7 +990,7 @@ mod tests {
     use crate::engine::sync::SyncEngine;
     use crate::expressions::{column_expr, column_pred, Expression as Expr, Predicate as Pred};
     use crate::schema::{ColumnMetadataKey, PrimitiveType};
-    use crate::Snapshot;
+    use crate::ResolvedTable;
 
     use super::*;
 
@@ -1190,7 +1190,7 @@ mod tests {
         let url = url::Url::from_directory_path(path).unwrap();
         let engine = SyncEngine::new();
 
-        let snapshot = Snapshot::try_new(url, &engine, None).unwrap();
+        let snapshot = ResolvedTable::try_new(url, &engine, None).unwrap();
         let scan = snapshot.into_scan_builder().build().unwrap();
         let files = get_files_for_scan(scan, &engine).unwrap();
         assert_eq!(files.len(), 1);
@@ -1207,7 +1207,7 @@ mod tests {
         let url = url::Url::from_directory_path(path).unwrap();
         let engine = Arc::new(SyncEngine::new());
 
-        let snapshot = Snapshot::try_new(url, engine.as_ref(), None).unwrap();
+        let snapshot = ResolvedTable::try_new(url, engine.as_ref(), None).unwrap();
         let scan = snapshot.into_scan_builder().build().unwrap();
         let files: Vec<ScanResult> = scan.execute(engine).unwrap().try_collect().unwrap();
 
@@ -1223,7 +1223,7 @@ mod tests {
         let url = url::Url::from_directory_path(path).unwrap();
         let engine = Arc::new(SyncEngine::new());
 
-        let snapshot = Snapshot::try_new(url, engine.as_ref(), None).unwrap();
+        let snapshot = ResolvedTable::try_new(url, engine.as_ref(), None).unwrap();
         let version = snapshot.version();
         let scan = snapshot.into_scan_builder().build().unwrap();
         let files: Vec<_> = scan
@@ -1257,7 +1257,7 @@ mod tests {
         let url = url::Url::from_directory_path(path).unwrap();
         let engine = Arc::new(SyncEngine::new());
 
-        let snapshot = Snapshot::try_new(url.clone(), engine.as_ref(), Some(0)).unwrap();
+        let snapshot = ResolvedTable::try_new(url.clone(), engine.as_ref(), Some(0)).unwrap();
         let scan = snapshot.into_scan_builder().build().unwrap();
         let files: Vec<_> = scan
             .scan_metadata(engine.as_ref())
@@ -1278,7 +1278,7 @@ mod tests {
             .into_iter()
             .map(|b| Box::new(ArrowEngineData::from(b)) as Box<dyn EngineData>)
             .collect();
-        let snapshot = Snapshot::try_new(url, engine.as_ref(), Some(1)).unwrap();
+        let snapshot = ResolvedTable::try_new(url, engine.as_ref(), Some(1)).unwrap();
         let scan = snapshot.into_scan_builder().build().unwrap();
         let new_files: Vec<_> = scan
             .scan_metadata_from(engine.as_ref(), 0, files, None)
@@ -1347,7 +1347,7 @@ mod tests {
         let url = url::Url::from_directory_path(path.unwrap()).unwrap();
         let engine = SyncEngine::new();
 
-        let snapshot = Snapshot::try_new(url, &engine, None).unwrap();
+        let snapshot = ResolvedTable::try_new(url, &engine, None).unwrap();
         let scan = snapshot.into_scan_builder().build().unwrap();
         let data: Vec<_> = scan
             .replay_for_scan_metadata(&engine)
@@ -1367,7 +1367,7 @@ mod tests {
         let url = url::Url::from_directory_path(path.unwrap()).unwrap();
         let engine = Arc::new(SyncEngine::new());
 
-        let snapshot = Arc::new(Snapshot::try_new(url, engine.as_ref(), None).unwrap());
+        let snapshot = Arc::new(ResolvedTable::try_new(url, engine.as_ref(), None).unwrap());
 
         // No predicate pushdown attempted, so the one data file should be returned.
         //
@@ -1410,7 +1410,7 @@ mod tests {
         let url = url::Url::from_directory_path(path.unwrap()).unwrap();
         let engine = Arc::new(SyncEngine::new());
 
-        let snapshot = Arc::new(Snapshot::try_new(url, engine.as_ref(), None).unwrap());
+        let snapshot = Arc::new(ResolvedTable::try_new(url, engine.as_ref(), None).unwrap());
 
         // Predicate over a logically valid but physically missing column. No data files should be
         // returned because the column is inferred to be all-null.
@@ -1445,7 +1445,7 @@ mod tests {
         let url = url::Url::from_directory_path(path).unwrap();
         let engine = SyncEngine::new();
 
-        let snapshot = Snapshot::try_new(url, &engine, None).unwrap();
+        let snapshot = ResolvedTable::try_new(url, &engine, None).unwrap();
         let scan = snapshot.into_scan_builder().build()?;
         let files = get_files_for_scan(scan, &engine)?;
         // test case:

@@ -10,8 +10,8 @@ use crate::actions::{
     SIDECAR_NAME,
 };
 use crate::path::{LogPathFileType, ParsedLogPath};
+use crate::resolved_table::LastCheckpointHint;
 use crate::schema::SchemaRef;
-use crate::snapshot::LastCheckpointHint;
 use crate::utils::require;
 use crate::{
     DeltaResult, Engine, EngineData, Error, Expression, ParquetHandler, Predicate, PredicateRef,
@@ -35,10 +35,10 @@ mod tests;
 ///     3. All checkpoint_parts must belong to the same checkpoint version, and must form a complete
 ///        version. Multi-part checkpoints must have all their parts.
 ///
-/// [`LogSegment`] is used in [`Snapshot`] when built with [`LogSegment::for_snapshot`], and
+/// [`LogSegment`] is used in [`ResolvedTable`] when built with [`LogSegment::for_snapshot`], and
 /// and in `TableChanges` when built with [`LogSegment::for_table_changes`].
 ///
-/// [`Snapshot`]: crate::snapshot::Snapshot
+/// [`ResolvedTable`]: crate::resolved_table::ResolvedTable
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[internal_api]
 pub(crate) struct LogSegment {
@@ -126,16 +126,16 @@ impl LogSegment {
         })
     }
 
-    /// Constructs a [`LogSegment`] to be used for [`Snapshot`]. For a `Snapshot` at version `n`:
+    /// Constructs a [`LogSegment`] to be used for [`ResolvedTable`]. For a `ResolvedTable` at version `n`:
     /// Its LogSegment is made of zero or one checkpoint, and all commits between the checkpoint up
     /// to and including the end version `n`. Note that a checkpoint may be made of multiple
     /// parts. All these parts will have the same checkpoint version.
     ///
-    /// The options for constructing a LogSegment for Snapshot are as follows:
+    /// The options for constructing a LogSegment for ResolvedTable are as follows:
     /// - `checkpoint_hint`: a `LastCheckpointHint` to start the log segment from (e.g. from reading the `last_checkpoint` file).
-    /// - `time_travel_version`: The version of the log that the Snapshot will be at.
+    /// - `time_travel_version`: The version of the log that the ResolvedTable will be at.
     ///
-    /// [`Snapshot`]: crate::snapshot::Snapshot
+    /// [`ResolvedTable`]: crate::resolved_table::ResolvedTable
     #[internal_api]
     pub(crate) fn for_snapshot(
         storage: &dyn StorageHandler,

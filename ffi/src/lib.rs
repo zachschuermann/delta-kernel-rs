@@ -11,8 +11,8 @@ use std::sync::Arc;
 use tracing::debug;
 use url::Url;
 
+use delta_kernel::resolved_table::ResolvedTable;
 use delta_kernel::schema::Schema;
-use delta_kernel::snapshot::Snapshot;
 use delta_kernel::{DeltaResult, Engine, EngineData};
 use delta_kernel_ffi_macros::handle_descriptor;
 
@@ -552,8 +552,8 @@ pub unsafe extern "C" fn free_engine(engine: Handle<SharedExternEngine>) {
 #[handle_descriptor(target=Schema, mutable=false, sized=true)]
 pub struct SharedSchema;
 
-#[handle_descriptor(target=Snapshot, mutable=false, sized=true)]
-pub struct SharedSnapshot;
+#[handle_descriptor(target=ResolvedTable, mutable=false, sized=true)]
+pub struct SharedResolvedTable;
 
 /// Get the latest snapshot from the specified table
 ///
@@ -561,20 +561,20 @@ pub struct SharedSnapshot;
 ///
 /// Caller is responsible for passing valid handles and path pointer.
 #[no_mangle]
-pub unsafe extern "C" fn snapshot(
+pub unsafe extern "C" fn resolved_table(
     path: KernelStringSlice,
     engine: Handle<SharedExternEngine>,
-) -> ExternResult<Handle<SharedSnapshot>> {
+) -> ExternResult<Handle<SharedResolvedTable>> {
     let url = unsafe { unwrap_and_parse_path_as_url(path) };
     let engine = unsafe { engine.as_ref() };
-    snapshot_impl(url, engine).into_extern_result(&engine)
+    resolved_table_impl(url, engine).into_extern_result(&engine)
 }
 
-fn snapshot_impl(
+fn resolved_table_impl(
     url: DeltaResult<Url>,
     extern_engine: &dyn ExternEngine,
-) -> DeltaResult<Handle<SharedSnapshot>> {
-    let snapshot = Snapshot::try_new(url?, extern_engine.engine().as_ref(), None)?;
+) -> DeltaResult<Handle<SharedResolvedTable>> {
+    let snapshot = ResolvedTable::try_new(url?, extern_engine.engine().as_ref(), None)?;
     Ok(Arc::new(snapshot).into())
 }
 
@@ -582,7 +582,7 @@ fn snapshot_impl(
 ///
 /// Caller is responsible for passing a valid handle.
 #[no_mangle]
-pub unsafe extern "C" fn free_snapshot(snapshot: Handle<SharedSnapshot>) {
+pub unsafe extern "C" fn free_snapshot(snapshot: Handle<SharedResolvedTable>) {
     debug!("engine released snapshot");
     snapshot.drop_handle();
 }
@@ -593,7 +593,7 @@ pub unsafe extern "C" fn free_snapshot(snapshot: Handle<SharedSnapshot>) {
 ///
 /// Caller is responsible for passing a valid handle.
 #[no_mangle]
-pub unsafe extern "C" fn version(snapshot: Handle<SharedSnapshot>) -> u64 {
+pub unsafe extern "C" fn version(snapshot: Handle<SharedResolvedTable>) -> u64 {
     let snapshot = unsafe { snapshot.as_ref() };
     snapshot.version()
 }
@@ -604,7 +604,9 @@ pub unsafe extern "C" fn version(snapshot: Handle<SharedSnapshot>) -> u64 {
 ///
 /// Caller is responsible for passing a valid snapshot handle.
 #[no_mangle]
-pub unsafe extern "C" fn logical_schema(snapshot: Handle<SharedSnapshot>) -> Handle<SharedSchema> {
+pub unsafe extern "C" fn logical_schema(
+    snapshot: Handle<SharedResolvedTable>,
+) -> Handle<SharedSchema> {
     let snapshot = unsafe { snapshot.as_ref() };
     snapshot.schema().into()
 }
@@ -626,7 +628,7 @@ pub unsafe extern "C" fn free_schema(schema: Handle<SharedSchema>) {
 /// Caller is responsible for passing a valid snapshot handle.
 #[no_mangle]
 pub unsafe extern "C" fn snapshot_table_root(
-    snapshot: Handle<SharedSnapshot>,
+    snapshot: Handle<SharedResolvedTable>,
     allocate_fn: AllocateStringFn,
 ) -> NullableCvoid {
     let snapshot = unsafe { snapshot.as_ref() };
@@ -639,7 +641,9 @@ pub unsafe extern "C" fn snapshot_table_root(
 /// # Safety
 /// Caller is responsible for passing a valid snapshot handle
 #[no_mangle]
-pub unsafe extern "C" fn get_partition_column_count(snapshot: Handle<SharedSnapshot>) -> usize {
+pub unsafe extern "C" fn get_partition_column_count(
+    snapshot: Handle<SharedResolvedTable>,
+) -> usize {
     let snapshot = unsafe { snapshot.as_ref() };
     snapshot.metadata().partition_columns().len()
 }
@@ -650,7 +654,7 @@ pub unsafe extern "C" fn get_partition_column_count(snapshot: Handle<SharedSnaps
 /// Caller is responsible for passing a valid snapshot handle.
 #[no_mangle]
 pub unsafe extern "C" fn get_partition_columns(
-    snapshot: Handle<SharedSnapshot>,
+    snapshot: Handle<SharedResolvedTable>,
 ) -> Handle<StringSliceIterator> {
     let snapshot = unsafe { snapshot.as_ref() };
     let iter: Box<StringIter> =
@@ -833,8 +837,12 @@ mod tests {
         let engine = engine_to_handle(Arc::new(engine), allocate_err);
         let path = "memory:///";
 
-        let snapshot =
-            unsafe { ok_or_panic(snapshot(kernel_string_slice!(path), engine.shallow_copy())) };
+        let snapshot = unsafe {
+            ok_or_panic(resolved_table(
+                kernel_string_slice!(path),
+                engine.shallow_copy(),
+            ))
+        };
 
         let version = unsafe { version(snapshot.shallow_copy()) };
         assert_eq!(version, 0);
@@ -862,8 +870,12 @@ mod tests {
         let engine = engine_to_handle(Arc::new(engine), allocate_err);
         let path = "memory:///";
 
-        let snapshot =
-            unsafe { ok_or_panic(snapshot(kernel_string_slice!(path), engine.shallow_copy())) };
+        let snapshot = unsafe {
+            ok_or_panic(resolved_table(
+                kernel_string_slice!(path),
+                engine.shallow_copy(),
+            ))
+        };
 
         let partition_count = unsafe { get_partition_column_count(snapshot.shallow_copy()) };
         assert_eq!(partition_count, 1, "Should have one partition");

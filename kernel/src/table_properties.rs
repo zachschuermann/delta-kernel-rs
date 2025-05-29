@@ -193,7 +193,7 @@ pub enum IsolationLevel {
 
     /// A weaker isolation level than Serializable. It ensures only that the write
     /// operations (that is, not reads) are serializable. However, this is still stronger
-    /// than Snapshot isolation. WriteSerializable is the default isolation level because
+    /// than ResolvedTable isolation. WriteSerializable is the default isolation level because
     /// it provides great balance of data consistency and availability for most common operations.
     WriteSerializable,
 
