@@ -22,7 +22,7 @@ pub(crate) type DomainMetadataMap = HashMap<String, DomainMetadata>;
 /// `None`. Additionally, this includes 'internal' (delta.*) domains. The consumer must filter
 /// these before returning domains to the user.
 // TODO we should have some finer-grained unit tests here instead of relying on the top-level
-// snapshot tests.
+// resolved_table tests.
 pub(crate) fn domain_metadata_configuration(
     log_segment: &LogSegment,
     domain: &str,

@@ -53,7 +53,7 @@ pub fn get_write_metadata_schema() -> &'static SchemaRef {
 /// txn.commit(&engine)?;
 /// ```
 pub struct Transaction {
-    read_snapshot: Arc<ResolvedTable>,
+    read_resolved_table: Arc<ResolvedTable>,
     operation: Option<String>,
     commit_info: Option<Arc<dyn EngineData>>,
     write_metadata: Vec<Box<dyn EngineData>>,
@@ -71,25 +71,25 @@ pub struct Transaction {
 impl std::fmt::Debug for Transaction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&format!(
-            "Transaction {{ read_snapshot version: {}, commit_info: {} }}",
-            self.read_snapshot.version(),
+            "Transaction {{ read_resolved_table version: {}, commit_info: {} }}",
+            self.read_resolved_table.version(),
             self.commit_info.is_some()
         ))
     }
 }
 
 impl Transaction {
-    /// Create a new transaction from a snapshot. The snapshot will be used to read the current
+    /// Create a new transaction from a resolved_table. The resolved_table will be used to read the current
     /// state of the table (e.g. to read the current version).
     ///
     /// Instead of using this API, the more typical (user-facing) API is
     /// [ResolvedTable::transaction](crate::resolved_table::ResolvedTable::transaction) to create a transaction from
-    /// a snapshot.
-    pub(crate) fn try_new(snapshot: impl Into<Arc<ResolvedTable>>) -> DeltaResult<Self> {
-        let read_snapshot = snapshot.into();
+    /// a resolved_table.
+    pub(crate) fn try_new(resolved_table: impl Into<Arc<ResolvedTable>>) -> DeltaResult<Self> {
+        let read_resolved_table = resolved_table.into();
 
         // important! before a read/write to the table we must check it is supported
-        read_snapshot
+        read_resolved_table
             .table_configuration()
             .ensure_write_supported()?;
 
@@ -101,7 +101,7 @@ impl Transaction {
             .ok_or_else(|| Error::generic("Failed to get current time for commit_timestamp"))?;
 
         Ok(Transaction {
-            read_snapshot,
+            read_resolved_table,
             operation: None,
             commit_info: None,
             write_metadata: vec![],
@@ -152,9 +152,9 @@ impl Transaction {
             .chain(set_transaction_actions);
 
         // step two: set new commit version (current_version + 1) and path to write
-        let commit_version = self.read_snapshot.version() + 1;
+        let commit_version = self.read_resolved_table.version() + 1;
         let commit_path =
-            ParsedLogPath::new_commit(self.read_snapshot.table_root(), commit_version)?;
+            ParsedLogPath::new_commit(self.read_resolved_table.table_root(), commit_version)?;
 
         // step three: commit the actions as a json file in the log
         let json_handler = engine.json_handler();
@@ -206,8 +206,8 @@ impl Transaction {
     fn generate_logical_to_physical(&self) -> Expression {
         // for now, we just pass through all the columns except partition columns.
         // note this is _incorrect_ if table config deems we need partition columns.
-        let partition_columns = &self.read_snapshot.metadata().partition_columns;
-        let schema = self.read_snapshot.schema();
+        let partition_columns = &self.read_resolved_table.metadata().partition_columns;
+        let schema = self.read_resolved_table.schema();
         let fields = schema
             .fields()
             .filter(|f| !partition_columns.contains(f.name()))
@@ -221,10 +221,14 @@ impl Transaction {
     // that engines cannot call this method after a metadata change, since the write context could
     // have invalid metadata.
     pub fn get_write_context(&self) -> WriteContext {
-        let target_dir = self.read_snapshot.table_root();
-        let snapshot_schema = self.read_snapshot.schema();
+        let target_dir = self.read_resolved_table.table_root();
+        let resolved_table_schema = self.read_resolved_table.schema();
         let logical_to_physical = self.generate_logical_to_physical();
-        WriteContext::new(target_dir.clone(), snapshot_schema, logical_to_physical)
+        WriteContext::new(
+            target_dir.clone(),
+            resolved_table_schema,
+            logical_to_physical,
+        )
     }
 
     /// Add write metadata about files to include in the transaction. This API can be called

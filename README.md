@@ -141,7 +141,7 @@ Some design principles which should be considered:
   and implementations could provide an "executor" based on tokio, smol, async-std, or whatever might
   be needed. Currently only a `tokio` based executor is provided.
 - Minimal `Table` API. The kernel intentionally exposes the concept of immutable versions of tables
-  through the snapshot API. This encourages users to think about the Delta table state more
+  through the resolved_table API. This encourages users to think about the Delta table state more
   accurately.
 - Prefer builder style APIs over object oriented ones.
 - "Simple" set of default-features enabled to provide the basic functionality with the least

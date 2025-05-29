@@ -245,8 +245,8 @@ void free_builder(SchemaBuilder builder)
   free(builder.lists);
 }
 
-// Print the schema of the snapshot
-void print_schema(SharedSnapshot* snapshot)
+// Print the schema of the resolved_table
+void print_schema(SharedSnapshot* resolved_table)
 {
   print_diag("Building schema\n");
   SchemaBuilder builder = {
@@ -273,7 +273,7 @@ void print_schema(SharedSnapshot* snapshot)
     .visit_timestamp = visit_timestamp,
     .visit_timestamp_ntz = visit_timestamp_ntz,
   };
-  SharedSchema* schema = logical_schema(snapshot);
+  SharedSchema* schema = logical_schema(resolved_table);
   uintptr_t schema_list_id = visit_schema(schema, &visitor);
 #ifdef VERBOSE
   printf("Schema returned in list %" PRIxPTR "\n", schema_list_id);

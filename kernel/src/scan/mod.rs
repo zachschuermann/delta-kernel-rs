@@ -42,9 +42,9 @@ static COMMIT_READ_SCHEMA: LazyLock<SchemaRef> =
 static CHECKPOINT_READ_SCHEMA: LazyLock<SchemaRef> =
     LazyLock::new(|| get_log_schema().project(&[ADD_NAME, SIDECAR_NAME]).unwrap());
 
-/// Builder to scan a snapshot of a table.
+/// Builder to scan a resolved_table of a table.
 pub struct ScanBuilder {
-    snapshot: Arc<ResolvedTable>,
+    resolved_table: Arc<ResolvedTable>,
     schema: Option<SchemaRef>,
     predicate: Option<PredicateRef>,
 }
@@ -60,9 +60,9 @@ impl std::fmt::Debug for ScanBuilder {
 
 impl ScanBuilder {
     /// Create a new [`ScanBuilder`] instance.
-    pub fn new(snapshot: impl Into<Arc<ResolvedTable>>) -> Self {
+    pub fn new(resolved_table: impl Into<Arc<ResolvedTable>>) -> Self {
         Self {
-            snapshot: snapshot.into(),
+            resolved_table: resolved_table.into(),
             schema: None,
             predicate: None,
         }
@@ -107,11 +107,11 @@ impl ScanBuilder {
     /// [`Scan`] type itself can be used to fetch the files and associated metadata required to
     /// perform actual data reads.
     pub fn build(self) -> DeltaResult<Scan> {
-        // if no schema is provided, use snapshot's entire schema (e.g. SELECT *)
-        let logical_schema = self.schema.unwrap_or_else(|| self.snapshot.schema());
+        // if no schema is provided, use resolved_table's entire schema (e.g. SELECT *)
+        let logical_schema = self.schema.unwrap_or_else(|| self.resolved_table.schema());
         let state_info = get_state_info(
             logical_schema.as_ref(),
-            &self.snapshot.metadata().partition_columns,
+            &self.resolved_table.metadata().partition_columns,
         )?;
 
         let physical_predicate = match self.predicate {
@@ -120,7 +120,7 @@ impl ScanBuilder {
         };
 
         Ok(Scan {
-            snapshot: self.snapshot,
+            resolved_table: self.resolved_table,
             logical_schema,
             physical_schema: Arc::new(StructType::new(state_info.read_fields)),
             physical_predicate,
@@ -379,7 +379,7 @@ impl HasSelectionVector for ScanMetadata {
 /// The result of building a scan over a table. This can be used to get the actual data from
 /// scanning the table.
 pub struct Scan {
-    snapshot: Arc<ResolvedTable>,
+    resolved_table: Arc<ResolvedTable>,
     logical_schema: SchemaRef,
     physical_schema: SchemaRef,
     physical_predicate: PhysicalPredicate,
@@ -521,11 +521,11 @@ impl Scan {
 
         // TODO(#966): validate that the current predicate is compatible with the hint predicate.
 
-        if existing_version > self.snapshot.version() {
+        if existing_version > self.resolved_table.version() {
             return Err(Error::Generic(format!(
                 "existing_version {} is greater than current version {}",
                 existing_version,
-                self.snapshot.version()
+                self.resolved_table.version()
             )));
         }
 
@@ -540,14 +540,14 @@ impl Scan {
         let apply_transform =
             move |data: Box<dyn EngineData>| Ok((transform.evaluate(data.as_ref())?, false));
 
-        // If the snapshot version corresponds to the hint version, we process the existing data
+        // If the resolved_table version corresponds to the hint version, we process the existing data
         // to apply file skipping and provide the required transformations.
-        if existing_version == self.snapshot.version() {
+        if existing_version == self.resolved_table.version() {
             let scan = existing_data.into_iter().map(apply_transform);
             return Ok(Box::new(self.scan_metadata_inner(engine, scan)?));
         }
 
-        let log_segment = self.snapshot.log_segment();
+        let log_segment = self.resolved_table.log_segment();
 
         // If the current log segment contains a checkpoint newer than the hint version
         // we disregard the existing data hint, and perform a full scan. The current log segment
@@ -594,7 +594,7 @@ impl Scan {
         // needed (currently just means no partition cols AND no column mapping but will be extended
         // for other transforms as we support them)
         let static_transform = (self.have_partition_cols
-            || self.snapshot.column_mapping_mode() != ColumnMappingMode::None)
+            || self.resolved_table.column_mapping_mode() != ColumnMappingMode::None)
             .then(|| Arc::new(Scan::get_static_transform(&self.all_fields)));
         let physical_predicate = match self.physical_predicate.clone() {
             PhysicalPredicate::StaticSkipAll => return Ok(None.into_iter().flatten()),
@@ -618,7 +618,7 @@ impl Scan {
     ) -> DeltaResult<impl Iterator<Item = DeltaResult<(Box<dyn EngineData>, bool)>> + Send> {
         // NOTE: We don't pass any meta-predicate because we expect no meaningful row group skipping
         // when ~every checkpoint file will contain the adds and removes we are looking for.
-        self.snapshot.log_segment().read_actions(
+        self.resolved_table.log_segment().read_actions(
             engine,
             COMMIT_READ_SCHEMA.clone(),
             CHECKPOINT_READ_SCHEMA.clone(),
@@ -630,8 +630,8 @@ impl Scan {
     /// only be called once per scan.
     pub fn global_scan_state(&self) -> GlobalScanState {
         GlobalScanState {
-            table_root: self.snapshot.table_root().to_string(),
-            partition_columns: self.snapshot.metadata().partition_columns.clone(),
+            table_root: self.resolved_table.table_root().to_string(),
+            partition_columns: self.resolved_table.metadata().partition_columns.clone(),
             logical_schema: self.logical_schema.clone(),
             physical_schema: self.physical_schema.clone(),
         }
@@ -678,7 +678,7 @@ impl Scan {
         );
 
         let global_state = Arc::new(self.global_scan_state());
-        let table_root = self.snapshot.table_root().clone();
+        let table_root = self.resolved_table.table_root().clone();
 
         let scan_metadata_iter = self.scan_metadata(engine.as_ref())?;
         let scan_files_iter = scan_metadata_iter
@@ -1190,8 +1190,8 @@ mod tests {
         let url = url::Url::from_directory_path(path).unwrap();
         let engine = SyncEngine::new();
 
-        let snapshot = ResolvedTable::try_new(url, &engine, None).unwrap();
-        let scan = snapshot.into_scan_builder().build().unwrap();
+        let resolved_table = ResolvedTable::try_new(url, &engine, None).unwrap();
+        let scan = resolved_table.into_scan_builder().build().unwrap();
         let files = get_files_for_scan(scan, &engine).unwrap();
         assert_eq!(files.len(), 1);
         assert_eq!(
@@ -1207,8 +1207,8 @@ mod tests {
         let url = url::Url::from_directory_path(path).unwrap();
         let engine = Arc::new(SyncEngine::new());
 
-        let snapshot = ResolvedTable::try_new(url, engine.as_ref(), None).unwrap();
-        let scan = snapshot.into_scan_builder().build().unwrap();
+        let resolved_table = ResolvedTable::try_new(url, engine.as_ref(), None).unwrap();
+        let scan = resolved_table.into_scan_builder().build().unwrap();
         let files: Vec<ScanResult> = scan.execute(engine).unwrap().try_collect().unwrap();
 
         assert_eq!(files.len(), 1);
@@ -1223,9 +1223,9 @@ mod tests {
         let url = url::Url::from_directory_path(path).unwrap();
         let engine = Arc::new(SyncEngine::new());
 
-        let snapshot = ResolvedTable::try_new(url, engine.as_ref(), None).unwrap();
-        let version = snapshot.version();
-        let scan = snapshot.into_scan_builder().build().unwrap();
+        let resolved_table = ResolvedTable::try_new(url, engine.as_ref(), None).unwrap();
+        let version = resolved_table.version();
+        let scan = resolved_table.into_scan_builder().build().unwrap();
         let files: Vec<_> = scan
             .scan_metadata(engine.as_ref())
             .unwrap()
@@ -1257,8 +1257,8 @@ mod tests {
         let url = url::Url::from_directory_path(path).unwrap();
         let engine = Arc::new(SyncEngine::new());
 
-        let snapshot = ResolvedTable::try_new(url.clone(), engine.as_ref(), Some(0)).unwrap();
-        let scan = snapshot.into_scan_builder().build().unwrap();
+        let resolved_table = ResolvedTable::try_new(url.clone(), engine.as_ref(), Some(0)).unwrap();
+        let scan = resolved_table.into_scan_builder().build().unwrap();
         let files: Vec<_> = scan
             .scan_metadata(engine.as_ref())
             .unwrap()
@@ -1278,8 +1278,8 @@ mod tests {
             .into_iter()
             .map(|b| Box::new(ArrowEngineData::from(b)) as Box<dyn EngineData>)
             .collect();
-        let snapshot = ResolvedTable::try_new(url, engine.as_ref(), Some(1)).unwrap();
-        let scan = snapshot.into_scan_builder().build().unwrap();
+        let resolved_table = ResolvedTable::try_new(url, engine.as_ref(), Some(1)).unwrap();
+        let scan = resolved_table.into_scan_builder().build().unwrap();
         let new_files: Vec<_> = scan
             .scan_metadata_from(engine.as_ref(), 0, files, None)
             .unwrap()
@@ -1347,8 +1347,8 @@ mod tests {
         let url = url::Url::from_directory_path(path.unwrap()).unwrap();
         let engine = SyncEngine::new();
 
-        let snapshot = ResolvedTable::try_new(url, &engine, None).unwrap();
-        let scan = snapshot.into_scan_builder().build().unwrap();
+        let resolved_table = ResolvedTable::try_new(url, &engine, None).unwrap();
+        let scan = resolved_table.into_scan_builder().build().unwrap();
         let data: Vec<_> = scan
             .replay_for_scan_metadata(&engine)
             .unwrap()
@@ -1367,12 +1367,12 @@ mod tests {
         let url = url::Url::from_directory_path(path.unwrap()).unwrap();
         let engine = Arc::new(SyncEngine::new());
 
-        let snapshot = Arc::new(ResolvedTable::try_new(url, engine.as_ref(), None).unwrap());
+        let resolved_table = Arc::new(ResolvedTable::try_new(url, engine.as_ref(), None).unwrap());
 
         // No predicate pushdown attempted, so the one data file should be returned.
         //
         // NOTE: The data file contains only five rows -- near guaranteed to produce one row group.
-        let scan = snapshot.clone().scan_builder().build().unwrap();
+        let scan = resolved_table.clone().scan_builder().build().unwrap();
         let data: Vec<_> = scan.execute(engine.clone()).unwrap().try_collect().unwrap();
         assert_eq!(data.len(), 1);
 
@@ -1380,7 +1380,7 @@ mod tests {
         let int_col = column_expr!("numeric.ints.int32");
         let value = Expr::literal(1000i32);
         let predicate = Arc::new(int_col.clone().gt(value.clone()));
-        let scan = snapshot
+        let scan = resolved_table
             .clone()
             .scan_builder()
             .with_predicate(predicate)
@@ -1395,7 +1395,7 @@ mod tests {
         // Effective predicate pushdown, so no data files should be returned. BUT since we disabled
         // predicate pushdown, the one data file is still returned.
         let predicate = Arc::new(int_col.lt(value));
-        let scan = snapshot
+        let scan = resolved_table
             .scan_builder()
             .with_predicate(predicate)
             .build()
@@ -1410,7 +1410,7 @@ mod tests {
         let url = url::Url::from_directory_path(path.unwrap()).unwrap();
         let engine = Arc::new(SyncEngine::new());
 
-        let snapshot = Arc::new(ResolvedTable::try_new(url, engine.as_ref(), None).unwrap());
+        let resolved_table = Arc::new(ResolvedTable::try_new(url, engine.as_ref(), None).unwrap());
 
         // Predicate over a logically valid but physically missing column. No data files should be
         // returned because the column is inferred to be all-null.
@@ -1418,7 +1418,7 @@ mod tests {
         // WARNING: https://github.com/delta-io/delta-kernel-rs/issues/434 - This
         // optimization is currently disabled, so the one data file is still returned.
         let predicate = Arc::new(column_expr!("missing").lt(Expr::literal(1000i64)));
-        let scan = snapshot
+        let scan = resolved_table
             .clone()
             .scan_builder()
             .with_predicate(predicate)
@@ -1429,7 +1429,7 @@ mod tests {
 
         // Predicate over a logically missing column fails the scan
         let predicate = Arc::new(column_expr!("numeric.ints.invalid").lt(Expr::literal(1000)));
-        snapshot
+        resolved_table
             .scan_builder()
             .with_predicate(predicate)
             .build()
@@ -1445,8 +1445,8 @@ mod tests {
         let url = url::Url::from_directory_path(path).unwrap();
         let engine = SyncEngine::new();
 
-        let snapshot = ResolvedTable::try_new(url, &engine, None).unwrap();
-        let scan = snapshot.into_scan_builder().build()?;
+        let resolved_table = ResolvedTable::try_new(url, &engine, None).unwrap();
+        let scan = resolved_table.into_scan_builder().build()?;
         let files = get_files_for_scan(scan, &engine)?;
         // test case:
         //

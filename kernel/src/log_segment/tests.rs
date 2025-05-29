@@ -65,8 +65,8 @@ fn test_replay_for_metadata() {
     let url = url::Url::from_directory_path(path.unwrap()).unwrap();
     let engine = SyncEngine::new();
 
-    let snapshot = ResolvedTable::try_new(url, &engine, None).unwrap();
-    let data: Vec<_> = snapshot
+    let resolved_table = ResolvedTable::try_new(url, &engine, None).unwrap();
+    let data: Vec<_> = resolved_table
         .log_segment()
         .replay_for_metadata(&engine)
         .unwrap()
@@ -224,7 +224,7 @@ fn create_log_path(path: &str) -> ParsedLogPath<FileMeta> {
 }
 
 #[test]
-fn build_snapshot_with_uuid_checkpoint_parquet() {
+fn build_resolved_table_with_uuid_checkpoint_parquet() {
     let (storage, log_root) = build_log_with_paths_and_checkpoint(
         &[
             delta_path_for_version(0, "json"),
@@ -240,7 +240,8 @@ fn build_snapshot_with_uuid_checkpoint_parquet() {
         None,
     );
 
-    let log_segment = LogSegment::for_snapshot(storage.as_ref(), log_root, None, None).unwrap();
+    let log_segment =
+        LogSegment::for_resolved_table(storage.as_ref(), log_root, None, None).unwrap();
     let commit_files = log_segment.ascending_commit_files;
     let checkpoint_parts = log_segment.checkpoint_parts;
 
@@ -253,7 +254,7 @@ fn build_snapshot_with_uuid_checkpoint_parquet() {
 }
 
 #[test]
-fn build_snapshot_with_uuid_checkpoint_json() {
+fn build_resolved_table_with_uuid_checkpoint_json() {
     let (storage, log_root) = build_log_with_paths_and_checkpoint(
         &[
             delta_path_for_version(0, "json"),
@@ -269,7 +270,8 @@ fn build_snapshot_with_uuid_checkpoint_json() {
         None,
     );
 
-    let log_segment = LogSegment::for_snapshot(storage.as_ref(), log_root, None, None).unwrap();
+    let log_segment =
+        LogSegment::for_resolved_table(storage.as_ref(), log_root, None, None).unwrap();
     let commit_files = log_segment.ascending_commit_files;
     let checkpoint_parts = log_segment.checkpoint_parts;
 
@@ -282,7 +284,7 @@ fn build_snapshot_with_uuid_checkpoint_json() {
 }
 
 #[test]
-fn build_snapshot_with_correct_last_uuid_checkpoint() {
+fn build_resolved_table_with_correct_last_uuid_checkpoint() {
     let checkpoint_metadata = LastCheckpointHint {
         version: 5,
         size: 10,
@@ -311,7 +313,8 @@ fn build_snapshot_with_correct_last_uuid_checkpoint() {
     );
 
     let log_segment =
-        LogSegment::for_snapshot(storage.as_ref(), log_root, checkpoint_metadata, None).unwrap();
+        LogSegment::for_resolved_table(storage.as_ref(), log_root, checkpoint_metadata, None)
+            .unwrap();
     let commit_files = log_segment.ascending_commit_files;
     let checkpoint_parts = log_segment.checkpoint_parts;
 
@@ -322,7 +325,7 @@ fn build_snapshot_with_correct_last_uuid_checkpoint() {
     assert_eq!(commit_files[1].version, 7);
 }
 #[test]
-fn build_snapshot_with_multiple_incomplete_multipart_checkpoints() {
+fn build_resolved_table_with_multiple_incomplete_multipart_checkpoints() {
     let (storage, log_root) = build_log_with_paths_and_checkpoint(
         &[
             delta_path_for_version(0, "json"),
@@ -347,7 +350,8 @@ fn build_snapshot_with_multiple_incomplete_multipart_checkpoints() {
         None,
     );
 
-    let log_segment = LogSegment::for_snapshot(storage.as_ref(), log_root, None, None).unwrap();
+    let log_segment =
+        LogSegment::for_resolved_table(storage.as_ref(), log_root, None, None).unwrap();
     let commit_files = log_segment.ascending_commit_files;
     let checkpoint_parts = log_segment.checkpoint_parts;
 
@@ -360,7 +364,7 @@ fn build_snapshot_with_multiple_incomplete_multipart_checkpoints() {
 }
 
 #[test]
-fn build_snapshot_with_out_of_date_last_checkpoint() {
+fn build_resolved_table_with_out_of_date_last_checkpoint() {
     let checkpoint_metadata = LastCheckpointHint {
         version: 3,
         size: 10,
@@ -386,7 +390,8 @@ fn build_snapshot_with_out_of_date_last_checkpoint() {
     );
 
     let log_segment =
-        LogSegment::for_snapshot(storage.as_ref(), log_root, checkpoint_metadata, None).unwrap();
+        LogSegment::for_resolved_table(storage.as_ref(), log_root, checkpoint_metadata, None)
+            .unwrap();
     let commit_files = log_segment.ascending_commit_files;
     let checkpoint_parts = log_segment.checkpoint_parts;
 
@@ -397,7 +402,7 @@ fn build_snapshot_with_out_of_date_last_checkpoint() {
     assert_eq!(commit_files[1].version, 7);
 }
 #[test]
-fn build_snapshot_with_correct_last_multipart_checkpoint() {
+fn build_resolved_table_with_correct_last_multipart_checkpoint() {
     let checkpoint_metadata = LastCheckpointHint {
         version: 5,
         size: 10,
@@ -428,7 +433,8 @@ fn build_snapshot_with_correct_last_multipart_checkpoint() {
     );
 
     let log_segment =
-        LogSegment::for_snapshot(storage.as_ref(), log_root, checkpoint_metadata, None).unwrap();
+        LogSegment::for_resolved_table(storage.as_ref(), log_root, checkpoint_metadata, None)
+            .unwrap();
     let commit_files = log_segment.ascending_commit_files;
     let checkpoint_parts = log_segment.checkpoint_parts;
 
@@ -440,7 +446,7 @@ fn build_snapshot_with_correct_last_multipart_checkpoint() {
 }
 
 #[test]
-fn build_snapshot_with_missing_checkpoint_part_from_hint_fails() {
+fn build_resolved_table_with_missing_checkpoint_part_from_hint_fails() {
     let checkpoint_metadata = LastCheckpointHint {
         version: 5,
         size: 10,
@@ -471,11 +477,11 @@ fn build_snapshot_with_missing_checkpoint_part_from_hint_fails() {
     );
 
     let log_segment =
-        LogSegment::for_snapshot(storage.as_ref(), log_root, checkpoint_metadata, None);
+        LogSegment::for_resolved_table(storage.as_ref(), log_root, checkpoint_metadata, None);
     assert!(log_segment.is_err())
 }
 #[test]
-fn build_snapshot_with_bad_checkpoint_hint_fails() {
+fn build_resolved_table_with_bad_checkpoint_hint_fails() {
     let checkpoint_metadata = LastCheckpointHint {
         version: 5,
         size: 10,
@@ -505,12 +511,12 @@ fn build_snapshot_with_bad_checkpoint_hint_fails() {
     );
 
     let log_segment =
-        LogSegment::for_snapshot(storage.as_ref(), log_root, checkpoint_metadata, None);
+        LogSegment::for_resolved_table(storage.as_ref(), log_root, checkpoint_metadata, None);
     assert!(log_segment.is_err())
 }
 
 #[test]
-fn build_snapshot_with_missing_checkpoint_part_no_hint() {
+fn build_resolved_table_with_missing_checkpoint_part_no_hint() {
     // Part 2 of 3 is missing from checkpoint 5. The ResolvedTable should be made of checkpoint
     // number 3 and commit files 4 to 7.
     let (storage, log_root) = build_log_with_paths_and_checkpoint(
@@ -532,7 +538,8 @@ fn build_snapshot_with_missing_checkpoint_part_no_hint() {
         None,
     );
 
-    let log_segment = LogSegment::for_snapshot(storage.as_ref(), log_root, None, None).unwrap();
+    let log_segment =
+        LogSegment::for_resolved_table(storage.as_ref(), log_root, None, None).unwrap();
 
     let commit_files = log_segment.ascending_commit_files;
     let checkpoint_parts = log_segment.checkpoint_parts;
@@ -546,7 +553,7 @@ fn build_snapshot_with_missing_checkpoint_part_no_hint() {
 }
 
 #[test]
-fn build_snapshot_with_out_of_date_last_checkpoint_and_incomplete_recent_checkpoint() {
+fn build_resolved_table_with_out_of_date_last_checkpoint_and_incomplete_recent_checkpoint() {
     // When the _last_checkpoint is out of date and the most recent checkpoint is incomplete, the
     // ResolvedTable should be made of the most recent complete checkpoint and the commit files that
     // follow it.
@@ -578,7 +585,8 @@ fn build_snapshot_with_out_of_date_last_checkpoint_and_incomplete_recent_checkpo
     );
 
     let log_segment =
-        LogSegment::for_snapshot(storage.as_ref(), log_root, checkpoint_metadata, None).unwrap();
+        LogSegment::for_resolved_table(storage.as_ref(), log_root, checkpoint_metadata, None)
+            .unwrap();
     let commit_files = log_segment.ascending_commit_files;
     let checkpoint_parts = log_segment.checkpoint_parts;
 
@@ -591,7 +599,7 @@ fn build_snapshot_with_out_of_date_last_checkpoint_and_incomplete_recent_checkpo
 }
 
 #[test]
-fn build_snapshot_without_checkpoints() {
+fn build_resolved_table_without_checkpoints() {
     let (storage, log_root) = build_log_with_paths_and_checkpoint(
         &[
             delta_path_for_version(0, "json"),
@@ -611,7 +619,7 @@ fn build_snapshot_without_checkpoints() {
 
     ///////// Specify no checkpoint or end version /////////
     let log_segment =
-        LogSegment::for_snapshot(storage.as_ref(), log_root.clone(), None, None).unwrap();
+        LogSegment::for_resolved_table(storage.as_ref(), log_root.clone(), None, None).unwrap();
     let commit_files = log_segment.ascending_commit_files;
     let checkpoint_parts = log_segment.checkpoint_parts;
 
@@ -624,7 +632,8 @@ fn build_snapshot_without_checkpoints() {
     assert_eq!(versions, expected_versions);
 
     ///////// Specify  only end version /////////
-    let log_segment = LogSegment::for_snapshot(storage.as_ref(), log_root, None, Some(2)).unwrap();
+    let log_segment =
+        LogSegment::for_resolved_table(storage.as_ref(), log_root, None, Some(2)).unwrap();
     let commit_files = log_segment.ascending_commit_files;
     let checkpoint_parts = log_segment.checkpoint_parts;
 
@@ -638,7 +647,7 @@ fn build_snapshot_without_checkpoints() {
 }
 
 #[test]
-fn build_snapshot_with_checkpoint_greater_than_time_travel_version() {
+fn build_resolved_table_with_checkpoint_greater_than_time_travel_version() {
     let checkpoint_metadata = LastCheckpointHint {
         version: 5,
         size: 10,
@@ -666,7 +675,8 @@ fn build_snapshot_with_checkpoint_greater_than_time_travel_version() {
     );
 
     let log_segment =
-        LogSegment::for_snapshot(storage.as_ref(), log_root, checkpoint_metadata, Some(4)).unwrap();
+        LogSegment::for_resolved_table(storage.as_ref(), log_root, checkpoint_metadata, Some(4))
+            .unwrap();
     let commit_files = log_segment.ascending_commit_files;
     let checkpoint_parts = log_segment.checkpoint_parts;
 
@@ -678,7 +688,7 @@ fn build_snapshot_with_checkpoint_greater_than_time_travel_version() {
 }
 
 #[test]
-fn build_snapshot_with_start_checkpoint_and_time_travel_version() {
+fn build_resolved_table_with_start_checkpoint_and_time_travel_version() {
     let checkpoint_metadata = LastCheckpointHint {
         version: 3,
         size: 10,
@@ -704,7 +714,8 @@ fn build_snapshot_with_start_checkpoint_and_time_travel_version() {
     );
 
     let log_segment =
-        LogSegment::for_snapshot(storage.as_ref(), log_root, checkpoint_metadata, Some(4)).unwrap();
+        LogSegment::for_resolved_table(storage.as_ref(), log_root, checkpoint_metadata, Some(4))
+            .unwrap();
 
     assert_eq!(log_segment.checkpoint_parts[0].version, 3);
     assert_eq!(log_segment.ascending_commit_files.len(), 1);
@@ -1325,7 +1336,7 @@ fn test_compaction_listing(
     }
     let (storage, log_root) = build_log_with_paths_and_checkpoint(&paths, None);
     let log_segment =
-        LogSegment::for_snapshot(storage.as_ref(), log_root.clone(), None, version_to_load)
+        LogSegment::for_resolved_table(storage.as_ref(), log_root.clone(), None, version_to_load)
             .unwrap();
 
     let version_to_load = version_to_load.unwrap_or(u64::MAX);

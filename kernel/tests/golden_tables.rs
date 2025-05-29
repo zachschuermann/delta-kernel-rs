@@ -167,8 +167,8 @@ async fn latest_snapshot_test(
     url: Url,
     expected_path: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let snapshot = ResolvedTable::try_new(url, &engine, None)?;
-    let scan = snapshot.into_scan_builder().build()?;
+    let resolved_table = ResolvedTable::try_new(url, &engine, None)?;
+    let scan = resolved_table.into_scan_builder().build()?;
     let scan_res = scan.execute(Arc::new(engine))?;
     let batches: Vec<RecordBatch> = scan_res
         .map(|scan_result| -> DeltaResult<_> {
@@ -269,10 +269,10 @@ async fn canonicalized_paths_test(
     table_root: Url,
     _expected: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // assert latest version is 1 and there are no files in the snapshot (add is removed)
-    let snapshot = ResolvedTable::try_new(table_root, &engine, None).unwrap();
-    assert_eq!(snapshot.version(), 1);
-    let scan = snapshot
+    // assert latest version is 1 and there are no files in the resolved_table (add is removed)
+    let resolved_table = ResolvedTable::try_new(table_root, &engine, None).unwrap();
+    assert_eq!(resolved_table.version(), 1);
+    let scan = resolved_table
         .into_scan_builder()
         .build()
         .expect("build the scan");
@@ -286,9 +286,9 @@ async fn checkpoint_test(
     table_root: Url,
     _expected: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let snapshot = ResolvedTable::try_new(table_root, &engine, None).unwrap();
-    let version = snapshot.version();
-    let scan = snapshot
+    let resolved_table = ResolvedTable::try_new(table_root, &engine, None).unwrap();
+    let version = resolved_table.version();
+    let scan = resolved_table
         .into_scan_builder()
         .build()
         .expect("build the scan");

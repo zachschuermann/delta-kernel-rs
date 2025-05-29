@@ -41,18 +41,18 @@ async fn test_read_table_with_checkpoint() {
     let engine = Arc::new(
         DefaultEngine::try_new(&location, HashMap::<String, String>::new()).unwrap(),
     );
-    let snapshot = ResolvedTable::try_new(location, engine, None)
+    let resolved_table = ResolvedTable::try_new(location, engine, None)
         .await
         .unwrap();
 
-    assert_eq!(snapshot.log_segment.checkpoint_files.len(), 1);
+    assert_eq!(resolved_table.log_segment.checkpoint_files.len(), 1);
     assert_eq!(
-        LogPath(&snapshot.log_segment.checkpoint_files[0].location).commit_version(),
+        LogPath(&resolved_table.log_segment.checkpoint_files[0].location).commit_version(),
         Some(2)
     );
-    assert_eq!(snapshot.log_segment.commit_files.len(), 1);
+    assert_eq!(resolved_table.log_segment.commit_files.len(), 1);
     assert_eq!(
-        LogPath(&snapshot.log_segment.commit_files[0].location).commit_version(),
+        LogPath(&resolved_table.log_segment.commit_files[0].location).commit_version(),
         Some(3)
     );
 }

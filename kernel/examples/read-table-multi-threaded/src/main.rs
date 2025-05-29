@@ -123,14 +123,14 @@ fn try_main() -> DeltaResult<()> {
     }
     let engine = DefaultEngine::try_new(&url, options, Arc::new(TokioBackgroundExecutor::new()))?;
 
-    let snapshot = ResolvedTable::try_new(url, &engine, None)?;
-    println!("Reading {}", snapshot.table_root());
+    let resolved_table = ResolvedTable::try_new(url, &engine, None)?;
+    println!("Reading {}", resolved_table.table_root());
 
     // process the columns requested and build a schema from them
     let read_schema_opt = cli
         .columns
         .map(|cols| -> DeltaResult<_> {
-            let table_schema = snapshot.schema();
+            let table_schema = resolved_table.schema();
             let selected_fields = cols.iter().map(|col| {
                 table_schema
                     .field(col)
@@ -144,7 +144,7 @@ fn try_main() -> DeltaResult<()> {
         .transpose()?;
 
     // build a scan with the specified schema
-    let scan = snapshot
+    let scan = resolved_table
         .into_scan_builder()
         .with_schema_opt(read_schema_opt)
         .build()?;

@@ -70,8 +70,8 @@ fn test_create_checkpoint_metadata_batch() -> DeltaResult<()> {
     )?;
 
     let table_root = Url::parse("memory:///")?;
-    let snapshot = ResolvedTable::try_new(table_root, &engine, None)?;
-    let writer = Arc::new(snapshot).checkpoint()?;
+    let resolved_table = ResolvedTable::try_new(table_root, &engine, None)?;
+    let writer = Arc::new(resolved_table).checkpoint()?;
 
     let checkpoint_batch = writer.create_checkpoint_metadata_batch(&engine)?;
 
@@ -294,8 +294,8 @@ fn test_v1_checkpoint_latest_version_by_default() -> DeltaResult<()> {
     )?;
 
     let table_root = Url::parse("memory:///")?;
-    let snapshot = Arc::new(ResolvedTable::try_new(table_root, &engine, None)?);
-    let writer = snapshot.checkpoint()?;
+    let resolved_table = Arc::new(ResolvedTable::try_new(table_root, &engine, None)?);
+    let writer = resolved_table.checkpoint()?;
 
     // Verify the checkpoint file path is the latest version by default.
     assert_eq!(
@@ -362,8 +362,8 @@ fn test_v1_checkpoint_specific_version() -> DeltaResult<()> {
 
     let table_root = Url::parse("memory:///")?;
     // Specify version 0 for checkpoint
-    let snapshot = Arc::new(ResolvedTable::try_new(table_root, &engine, Some(0))?);
-    let writer = snapshot.checkpoint()?;
+    let resolved_table = Arc::new(ResolvedTable::try_new(table_root, &engine, Some(0))?);
+    let writer = resolved_table.checkpoint()?;
 
     // Verify the checkpoint file path is the specified version.
     assert_eq!(
@@ -410,8 +410,8 @@ fn test_finalize_errors_if_checkpoint_data_iterator_is_not_exhausted() -> DeltaR
     )?;
 
     let table_root = Url::parse("memory:///")?;
-    let snapshot = Arc::new(ResolvedTable::try_new(table_root, &engine, Some(0))?);
-    let writer = snapshot.checkpoint()?;
+    let resolved_table = Arc::new(ResolvedTable::try_new(table_root, &engine, Some(0))?);
+    let writer = resolved_table.checkpoint()?;
     let data_iter = writer.checkpoint_data(&engine)?;
 
     /* The returned data iterator has batches that we do not consume */
@@ -464,8 +464,8 @@ fn test_v2_checkpoint_supported_table() -> DeltaResult<()> {
     )?;
 
     let table_root = Url::parse("memory:///")?;
-    let snapshot = Arc::new(ResolvedTable::try_new(table_root, &engine, None)?);
-    let writer = snapshot.checkpoint()?;
+    let resolved_table = Arc::new(ResolvedTable::try_new(table_root, &engine, None)?);
+    let writer = resolved_table.checkpoint()?;
 
     // Verify the checkpoint file path is the latest version by default.
     assert_eq!(

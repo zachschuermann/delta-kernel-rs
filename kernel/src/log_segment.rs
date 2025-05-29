@@ -35,7 +35,7 @@ mod tests;
 ///     3. All checkpoint_parts must belong to the same checkpoint version, and must form a complete
 ///        version. Multi-part checkpoints must have all their parts.
 ///
-/// [`LogSegment`] is used in [`ResolvedTable`] when built with [`LogSegment::for_snapshot`], and
+/// [`LogSegment`] is used in [`ResolvedTable`] when built with [`LogSegment::for_resolved_table`], and
 /// and in `TableChanges` when built with [`LogSegment::for_table_changes`].
 ///
 /// [`ResolvedTable`]: crate::resolved_table::ResolvedTable
@@ -137,7 +137,7 @@ impl LogSegment {
     ///
     /// [`ResolvedTable`]: crate::resolved_table::ResolvedTable
     #[internal_api]
-    pub(crate) fn for_snapshot(
+    pub(crate) fn for_resolved_table(
         storage: &dyn StorageHandler,
         log_root: Url,
         checkpoint_hint: impl Into<Option<LastCheckpointHint>>,

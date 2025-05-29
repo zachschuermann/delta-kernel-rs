@@ -254,7 +254,7 @@ impl CheckpointVisitor<'_> {
     ///
     /// A remove action includes a deletion_timestamp indicating when the deletion occurred. Physical
     /// files are deleted lazily after a user-defined expiration time. Remove actions are kept to allow
-    /// concurrent readers to read snapshots at older versions.
+    /// concurrent readers to read resolved_tables at older versions.
     ///
     /// Tombstone expiration rules:
     /// - If deletion_timestamp <= minimum_file_retention_timestamp: Expired (exclude)

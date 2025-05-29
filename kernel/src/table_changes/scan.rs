@@ -200,7 +200,7 @@ impl TableChangesScan {
             PhysicalPredicate::Some(predicate, schema) => Some((predicate, schema)),
             PhysicalPredicate::None => None,
         };
-        let schema = self.table_changes.end_snapshot.schema();
+        let schema = self.table_changes.end_resolved_table.schema();
         let it = table_changes_action_iter(engine, commits, schema, physical_predicate)?;
         Ok(Some(it).into_iter().flatten())
     }
@@ -208,10 +208,10 @@ impl TableChangesScan {
     /// Get global state that is valid for the entire scan. This is somewhat expensive so should
     /// only be called once per scan.
     fn global_scan_state(&self) -> GlobalScanState {
-        let end_snapshot = &self.table_changes.end_snapshot;
+        let end_resolved_table = &self.table_changes.end_resolved_table;
         GlobalScanState {
             table_root: self.table_changes.table_root.to_string(),
-            partition_columns: end_snapshot.metadata().partition_columns.clone(),
+            partition_columns: end_resolved_table.metadata().partition_columns.clone(),
             logical_schema: self.logical_schema.clone(),
             physical_schema: self.physical_schema.clone(),
         }

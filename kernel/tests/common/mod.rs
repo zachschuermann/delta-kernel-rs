@@ -69,8 +69,8 @@ pub(crate) fn test_read(
     url: Url,
     engine: Arc<dyn Engine>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let snapshot = ResolvedTable::try_new(url, engine.as_ref(), None)?;
-    let scan = snapshot.into_scan_builder().build()?;
+    let resolved_table = ResolvedTable::try_new(url, engine.as_ref(), None)?;
+    let scan = resolved_table.into_scan_builder().build()?;
     let batches = read_scan(&scan, engine)?;
     let formatted = pretty_format_batches(&batches).unwrap().to_string();
 

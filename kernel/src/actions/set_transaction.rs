@@ -102,8 +102,8 @@ mod tests {
         let url = url::Url::from_directory_path(path).unwrap();
         let engine = SyncEngine::new();
 
-        let snapshot = ResolvedTable::try_new(url, &engine, None).unwrap();
-        let log_segment = snapshot.log_segment();
+        let resolved_table = ResolvedTable::try_new(url, &engine, None).unwrap();
+        let log_segment = resolved_table.log_segment();
 
         (
             SetTransactionScanner::get_all(log_segment, &engine).unwrap(),
@@ -152,8 +152,8 @@ mod tests {
         let url = url::Url::from_directory_path(path.unwrap()).unwrap();
         let engine = SyncEngine::new();
 
-        let snapshot = ResolvedTable::try_new(url, &engine, None).unwrap();
-        let log_segment = snapshot.log_segment();
+        let resolved_table = ResolvedTable::try_new(url, &engine, None).unwrap();
+        let log_segment = resolved_table.log_segment();
 
         // The checkpoint has five parts, each containing one action. There are two app ids.
         let data: Vec<_> = replay_for_app_ids(log_segment, &engine)

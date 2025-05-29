@@ -71,18 +71,18 @@ fn try_main() -> DeltaResult<()> {
         Arc::new(TokioBackgroundExecutor::new()),
     )?);
 
-    let snapshot = ResolvedTable::try_new(url, engine.as_ref(), None)?;
-    println!("Reading {}", snapshot.table_root());
+    let resolved_table = ResolvedTable::try_new(url, engine.as_ref(), None)?;
+    println!("Reading {}", resolved_table.table_root());
 
     if cli.schema_only {
-        println!("{:#?}", snapshot.schema());
+        println!("{:#?}", resolved_table.schema());
         return Ok(());
     }
 
     let read_schema_opt = cli
         .columns
         .map(|cols| -> DeltaResult<_> {
-            let table_schema = snapshot.schema();
+            let table_schema = resolved_table.schema();
             let selected_fields = cols.iter().map(|col| {
                 table_schema
                     .field(col)
@@ -94,7 +94,7 @@ fn try_main() -> DeltaResult<()> {
             Schema::try_new(selected_fields).map(Arc::new)
         })
         .transpose()?;
-    let scan = snapshot
+    let scan = resolved_table
         .into_scan_builder()
         .with_schema_opt(read_schema_opt)
         .build()?;

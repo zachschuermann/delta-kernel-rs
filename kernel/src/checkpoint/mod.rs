@@ -45,11 +45,11 @@
 //!
 //! let engine: &dyn Engine = todo!(); /* create engine instance */
 //!
-//! // Create a snapshot for the table at the version you want to checkpoint (None = latest)
-//! let snapshot = Arc::new(ResolvedTable::try_from_uri("./tests/data/app-txn-no-checkpoint", engine, None)?);
+//! // Create a resolved_table for the table at the version you want to checkpoint (None = latest)
+//! let resolved_table = Arc::new(ResolvedTable::try_from_uri("./tests/data/app-txn-no-checkpoint", engine, None)?);
 //!
-//! // Create a checkpoint writer from the snapshot
-//! let mut writer = snapshot.checkpoint()?;
+//! // Create a checkpoint writer from the resolved_table
+//! let mut writer = resolved_table.checkpoint()?;
 //!
 //! // Get the checkpoint path and data
 //! let checkpoint_path = writer.checkpoint_path()?;
@@ -195,32 +195,35 @@ impl Iterator for CheckpointDataIterator {
 /// # See Also
 /// See the [module-level documentation](self) for the complete checkpoint workflow
 pub struct CheckpointWriter {
-    /// Reference to the snapshot (i.e. version) of the table being checkpointed
-    pub(crate) snapshot: Arc<ResolvedTable>,
+    /// Reference to the resolved_table (i.e. version) of the table being checkpointed
+    pub(crate) resolved_table: Arc<ResolvedTable>,
 
-    /// The version of the snapshot being checkpointed.
-    /// Note: Although the version is stored as a u64 in the snapshot, it is stored as an i64
+    /// The version of the resolved_table being checkpointed.
+    /// Note: Although the version is stored as a u64 in the resolved_table, it is stored as an i64
     /// field here to avoid multiple type conversions.
     version: i64,
 }
 
 impl CheckpointWriter {
-    /// Creates a new [`CheckpointWriter`] for the given snapshot.
-    pub(crate) fn try_new(snapshot: Arc<ResolvedTable>) -> DeltaResult<Self> {
-        let version = i64::try_from(snapshot.version()).map_err(|e| {
+    /// Creates a new [`CheckpointWriter`] for the given resolved_table.
+    pub(crate) fn try_new(resolved_table: Arc<ResolvedTable>) -> DeltaResult<Self> {
+        let version = i64::try_from(resolved_table.version()).map_err(|e| {
             Error::CheckpointWrite(format!(
                 "Failed to convert checkpoint version from u64 {} to i64: {}",
-                snapshot.version(),
+                resolved_table.version(),
                 e
             ))
         })?;
 
-        Ok(Self { snapshot, version })
+        Ok(Self {
+            resolved_table,
+            version,
+        })
     }
     /// Returns the URL where the checkpoint file should be written.
     ///
     /// This method generates the checkpoint path based on the table's root and the version
-    /// of the underlying snapshot being checkpointed. The resulting path follows the classic
+    /// of the underlying resolved_table being checkpointed. The resulting path follows the classic
     /// Delta checkpoint naming convention (where the version is zero-padded to 20 digits):
     ///
     /// `<table_root>/<version>.checkpoint.parquet`
@@ -229,8 +232,8 @@ impl CheckpointWriter {
     /// the checkpoint path will be: `s3://bucket/path/00000000000000000010.checkpoint.parquet`
     pub fn checkpoint_path(&self) -> DeltaResult<Url> {
         ParsedLogPath::new_classic_parquet_checkpoint(
-            self.snapshot.table_root(),
-            self.snapshot.version(),
+            self.resolved_table.table_root(),
+            self.resolved_table.version(),
         )
         .map(|parsed| parsed.location)
     }
@@ -254,11 +257,11 @@ impl CheckpointWriter {
     // 5. Generates the appropriate checkpoint path
     pub fn checkpoint_data(&self, engine: &dyn Engine) -> DeltaResult<CheckpointDataIterator> {
         let is_v2_checkpoints_supported = self
-            .snapshot
+            .resolved_table
             .table_configuration()
             .is_v2_checkpoint_write_supported();
 
-        let actions = self.snapshot.log_segment().read_actions(
+        let actions = self.resolved_table.log_segment().read_actions(
             engine,
             CHECKPOINT_ACTIONS_SCHEMA.clone(),
             CHECKPOINT_ACTIONS_SCHEMA.clone(),
@@ -327,7 +330,7 @@ impl CheckpointWriter {
         );
 
         let last_checkpoint_path = self
-            .snapshot
+            .resolved_table
             .log_segment()
             .log_root
             .join(LAST_CHECKPOINT_FILE_NAME)?;
@@ -395,7 +398,7 @@ impl CheckpointWriter {
     /// # Note: The default retention period is 7 days, matching delta-spark's behavior.
     fn deleted_file_retention_timestamp(&self) -> DeltaResult<i64> {
         let retention_duration = self
-            .snapshot
+            .resolved_table
             .table_properties()
             .deleted_file_retention_duration;
 

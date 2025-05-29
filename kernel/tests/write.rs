@@ -211,8 +211,8 @@ async fn test_commit_info() -> Result<(), Box<dyn std::error::Error>> {
     for (url, engine, store, table_name) in setup_tables(schema, &[]).await? {
         let commit_info = new_commit_info()?;
 
-        let snapshot = Arc::new(ResolvedTable::try_new(url, &engine, None)?);
-        let txn = snapshot.transaction()?.with_commit_info(commit_info);
+        let resolved_table = Arc::new(ResolvedTable::try_new(url, &engine, None)?);
+        let txn = resolved_table.transaction()?.with_commit_info(commit_info);
 
         // commit!
         txn.commit(&engine)?;
@@ -258,9 +258,9 @@ async fn test_empty_commit() -> Result<(), Box<dyn std::error::Error>> {
     )]));
 
     for (url, engine, _store, _table_name) in setup_tables(schema, &[]).await? {
-        let snapshot = Arc::new(ResolvedTable::try_new(url, &engine, None)?);
+        let resolved_table = Arc::new(ResolvedTable::try_new(url, &engine, None)?);
         assert!(matches!(
-            snapshot.transaction()?.commit(&engine).unwrap_err(),
+            resolved_table.transaction()?.commit(&engine).unwrap_err(),
             KernelError::MissingCommitInfo
         ));
     }
@@ -282,8 +282,8 @@ async fn test_invalid_commit_info() -> Result<(), Box<dyn std::error::Error>> {
         let commit_info_schema = Arc::new(ArrowSchema::empty());
         let commit_info_batch = RecordBatch::new_empty(commit_info_schema.clone());
         assert!(commit_info_batch.num_rows() == 0);
-        let snapshot = Arc::new(ResolvedTable::try_new(url, &engine, None)?);
-        let txn = snapshot
+        let resolved_table = Arc::new(ResolvedTable::try_new(url, &engine, None)?);
+        let txn = resolved_table
             .clone()
             .transaction()?
             .with_commit_info(Box::new(ArrowEngineData::new(commit_info_batch)));
@@ -308,7 +308,7 @@ async fn test_invalid_commit_info() -> Result<(), Box<dyn std::error::Error>> {
             ]))],
         )?;
 
-        let txn = snapshot
+        let txn = resolved_table
             .transaction()?
             .with_commit_info(Box::new(ArrowEngineData::new(commit_info_batch)));
 
@@ -391,8 +391,8 @@ async fn test_append() -> Result<(), Box<dyn std::error::Error>> {
     for (url, engine, store, table_name) in setup_tables(schema.clone(), &[]).await? {
         let commit_info = new_commit_info()?;
 
-        let snapshot = Arc::new(ResolvedTable::try_new(url.clone(), &engine, None)?);
-        let mut txn = snapshot
+        let resolved_table = Arc::new(ResolvedTable::try_new(url.clone(), &engine, None)?);
+        let mut txn = resolved_table
             .clone()
             .transaction()?
             .with_commit_info(commit_info);
@@ -527,8 +527,8 @@ async fn test_append_partitioned() -> Result<(), Box<dyn std::error::Error>> {
     {
         let commit_info = new_commit_info()?;
 
-        let snapshot = Arc::new(ResolvedTable::try_new(url.clone(), &engine, None)?);
-        let mut txn = snapshot
+        let resolved_table = Arc::new(ResolvedTable::try_new(url.clone(), &engine, None)?);
+        let mut txn = resolved_table
             .clone()
             .transaction()?
             .with_commit_info(commit_info);
@@ -669,8 +669,8 @@ async fn test_append_invalid_schema() -> Result<(), Box<dyn std::error::Error>> 
     for (url, engine, _store, _table_name) in setup_tables(table_schema, &[]).await? {
         let commit_info = new_commit_info()?;
 
-        let snapshot = Arc::new(ResolvedTable::try_new(url, &engine, None)?);
-        let txn = snapshot.transaction()?.with_commit_info(commit_info);
+        let resolved_table = Arc::new(ResolvedTable::try_new(url, &engine, None)?);
+        let txn = resolved_table.transaction()?.with_commit_info(commit_info);
 
         // create two new arrow record batches to append
         let append_data = [["a", "b"], ["c", "d"]].map(|data| -> DeltaResult<_> {
@@ -725,11 +725,11 @@ async fn test_write_txn_actions() -> Result<(), Box<dyn std::error::Error>> {
 
     for (url, engine, store, table_name) in setup_tables(schema, &[]).await? {
         let commit_info = new_commit_info()?;
-        let snapshot = Arc::new(ResolvedTable::try_new(url.clone(), &engine, None)?);
+        let resolved_table = Arc::new(ResolvedTable::try_new(url.clone(), &engine, None)?);
 
         // can't have duplicate app_id in same transaction
         assert!(matches!(
-            snapshot
+            resolved_table
                 .clone()
                 .transaction()?
                 .with_transaction_id("app_id1".to_string(), 0)
@@ -738,7 +738,7 @@ async fn test_write_txn_actions() -> Result<(), Box<dyn std::error::Error>> {
             Err(KernelError::Generic(msg)) if msg == "app_id app_id1 already exists in transaction"
         ));
 
-        let txn = snapshot
+        let txn = resolved_table
             .clone()
             .transaction()?
             .with_commit_info(commit_info)
@@ -748,16 +748,20 @@ async fn test_write_txn_actions() -> Result<(), Box<dyn std::error::Error>> {
         // commit!
         txn.commit(&engine)?;
 
-        let snapshot = Arc::new(ResolvedTable::try_new(url, &engine, None)?);
+        let resolved_table = Arc::new(ResolvedTable::try_new(url, &engine, None)?);
         assert_eq!(
-            snapshot.clone().get_app_id_version("app_id1", &engine)?,
+            resolved_table
+                .clone()
+                .get_app_id_version("app_id1", &engine)?,
             Some(1)
         );
         assert_eq!(
-            snapshot.clone().get_app_id_version("app_id2", &engine)?,
+            resolved_table
+                .clone()
+                .get_app_id_version("app_id2", &engine)?,
             Some(2)
         );
-        assert_eq!(snapshot.get_app_id_version("app_id3", &engine)?, None);
+        assert_eq!(resolved_table.get_app_id_version("app_id3", &engine)?, None);
 
         let commit1 = store
             .get(&Path::from(format!(

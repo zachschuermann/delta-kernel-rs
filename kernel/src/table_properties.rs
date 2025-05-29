@@ -117,9 +117,9 @@ pub struct TableProperties {
     /// generates for random prefixes.
     pub random_prefix_length: Option<NonZero<u64>>,
 
-    /// The shortest duration within which new snapshots will retain transaction identifiers (for
-    /// example, SetTransactions). When a new snapshot sees a transaction identifier older than or
-    /// equal to the duration specified by this property, the snapshot considers it expired and
+    /// The shortest duration within which new resolved_tables will retain transaction identifiers (for
+    /// example, SetTransactions). When a new resolved_table sees a transaction identifier older than or
+    /// equal to the duration specified by this property, the resolved_table considers it expired and
     /// ignores it. The SetTransaction identifier is used when making the writes idempotent.
     pub set_transaction_retention_duration: Option<Duration>,
 
@@ -198,9 +198,9 @@ pub enum IsolationLevel {
     WriteSerializable,
 
     /// SnapshotIsolation is a guarantee that all reads made in a transaction will see a consistent
-    /// snapshot of the database (in practice it reads the last committed values that existed at the
+    /// resolved_table of the database (in practice it reads the last committed values that existed at the
     /// time it started), and the transaction itself will successfully commit only if no updates
-    /// it has made conflict with any concurrent updates made since that snapshot.
+    /// it has made conflict with any concurrent updates made since that resolved_table.
     SnapshotIsolation,
 }
 

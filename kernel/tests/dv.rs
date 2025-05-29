@@ -32,8 +32,8 @@ fn dv_table() -> Result<(), Box<dyn std::error::Error>> {
     let url = url::Url::from_directory_path(path).unwrap();
     let engine = DefaultEngine::new_local();
 
-    let snapshot = ResolvedTable::try_new(url, engine.as_ref(), None)?;
-    let scan = snapshot.into_scan_builder().build()?;
+    let resolved_table = ResolvedTable::try_new(url, engine.as_ref(), None)?;
+    let scan = resolved_table.into_scan_builder().build()?;
 
     let stream = scan.execute(engine)?;
     let total_rows = count_total_scan_rows(stream)?;
@@ -47,8 +47,8 @@ fn non_dv_table() -> Result<(), Box<dyn std::error::Error>> {
     let url = url::Url::from_directory_path(path).unwrap();
     let engine = DefaultEngine::new_local();
 
-    let snapshot = ResolvedTable::try_new(url, engine.as_ref(), None)?;
-    let scan = snapshot.into_scan_builder().build()?;
+    let resolved_table = ResolvedTable::try_new(url, engine.as_ref(), None)?;
+    let scan = resolved_table.into_scan_builder().build()?;
 
     let stream = scan.execute(engine)?;
     let total_rows = count_total_scan_rows(stream)?;

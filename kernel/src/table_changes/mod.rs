@@ -112,7 +112,7 @@ static CDF_FIELDS: LazyLock<[StructField; 3]> = LazyLock::new(|| {
 pub struct TableChanges {
     pub(crate) log_segment: LogSegment,
     table_root: Url,
-    end_snapshot: Arc<ResolvedTable>,
+    end_resolved_table: Arc<ResolvedTable>,
     start_version: Version,
     schema: Schema,
 }
@@ -147,16 +147,16 @@ impl TableChanges {
             end_version,
         )?;
 
-        // Both snapshots ensure that reading is supported at the start and end version using
+        // Both resolved_tables ensure that reading is supported at the start and end version using
         // `ensure_read_supported`. Note that we must still verify that reading is
         // supported for every protocol action in the CDF range.
-        let start_snapshot = Arc::new(ResolvedTable::try_new(
+        let start_resolved_table = Arc::new(ResolvedTable::try_new(
             table_root.as_url().clone(),
             engine,
             Some(start_version),
         )?);
-        let end_snapshot =
-            ResolvedTable::try_new_from(start_snapshot.clone(), engine, end_version)?;
+        let end_resolved_table =
+            ResolvedTable::try_new_from(start_resolved_table.clone(), engine, end_version)?;
 
         // Verify CDF is enabled at the beginning and end of the interval using
         // [`check_cdf_table_properties`] to fail early. This also ensures that column mapping is
@@ -166,28 +166,30 @@ impl TableChanges {
         // we support CDF with those features enabled.
         //
         // Note: We must still check each metadata and protocol action in the CDF range.
-        let check_table_config = |snapshot: &ResolvedTable| {
-            if snapshot.table_configuration().is_cdf_read_supported() {
+        let check_table_config = |resolved_table: &ResolvedTable| {
+            if resolved_table.table_configuration().is_cdf_read_supported() {
                 Ok(())
             } else {
-                Err(Error::change_data_feed_unsupported(snapshot.version()))
+                Err(Error::change_data_feed_unsupported(
+                    resolved_table.version(),
+                ))
             }
         };
-        check_table_config(&start_snapshot)?;
-        check_table_config(&end_snapshot)?;
+        check_table_config(&start_resolved_table)?;
+        check_table_config(&end_resolved_table)?;
 
         // Verify that the start and end schemas are compatible. We must still check schema
         // compatibility for each schema update in the CDF range.
         // Note: Schema compatibility check will be changed in the future to be more flexible.
         // See issue [#523](https://github.com/delta-io/delta-kernel-rs/issues/523)
-        if start_snapshot.schema() != end_snapshot.schema() {
+        if start_resolved_table.schema() != end_resolved_table.schema() {
             return Err(Error::generic(format!(
-                "Failed to build TableChanges: Start and end version schemas are different. Found start version schema {:?} and end version schema {:?}", start_snapshot.schema(), end_snapshot.schema(),
+                "Failed to build TableChanges: Start and end version schemas are different. Found start version schema {:?} and end version schema {:?}", start_resolved_table.schema(), end_resolved_table.schema(),
             )));
         }
 
         let schema = StructType::new(
-            end_snapshot
+            end_resolved_table
                 .schema()
                 .fields()
                 .cloned()
@@ -196,7 +198,7 @@ impl TableChanges {
 
         Ok(TableChanges {
             table_root,
-            end_snapshot,
+            end_resolved_table,
             log_segment,
             start_version,
             schema,
@@ -223,7 +225,7 @@ impl TableChanges {
     }
     /// The partition columns that will be read.
     pub(crate) fn partition_columns(&self) -> &Vec<String> {
-        &self.end_snapshot.metadata().partition_columns
+        &self.end_resolved_table.metadata().partition_columns
     }
 
     /// Create a [`TableChangesScanBuilder`] for an `Arc<TableChanges>`.

@@ -75,18 +75,18 @@ impl TestCaseInfo {
         Ok((latest, cases))
     }
 
-    fn assert_snapshot_meta(
+    fn assert_resolved_table_meta(
         &self,
         case: &TableVersionMetaData,
-        snapshot: &ResolvedTable,
+        resolved_table: &ResolvedTable,
     ) -> TestResult<()> {
-        assert_eq!(snapshot.version(), case.version);
+        assert_eq!(resolved_table.version(), case.version);
 
         // assert correct metadata is read
-        let metadata = snapshot.metadata();
-        let protocol = snapshot.protocol();
+        let metadata = resolved_table.metadata();
+        let protocol = resolved_table.protocol();
         let tvm = TableVersionMetaData {
-            version: snapshot.version(),
+            version: resolved_table.version(),
             properties: metadata
                 .configuration()
                 .iter()
@@ -103,13 +103,13 @@ impl TestCaseInfo {
         let engine = engine.as_ref();
         let (latest, versions) = self.versions().await?;
 
-        let snapshot = ResolvedTable::try_new(self.table_root()?, engine, None)?;
-        self.assert_snapshot_meta(&latest, &snapshot)?;
+        let resolved_table = ResolvedTable::try_new(self.table_root()?, engine, None)?;
+        self.assert_resolved_table_meta(&latest, &resolved_table)?;
 
         for table_version in versions {
-            let snapshot =
+            let resolved_table =
                 ResolvedTable::try_new(self.table_root()?, engine, Some(table_version.version))?;
-            self.assert_snapshot_meta(&table_version, &snapshot)?;
+            self.assert_resolved_table_meta(&table_version, &resolved_table)?;
         }
 
         Ok(())

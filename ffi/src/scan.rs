@@ -86,27 +86,27 @@ pub unsafe extern "C" fn free_scan(scan: Handle<SharedScan>) {
     scan.drop_handle();
 }
 
-/// Get a [`Scan`] over the table specified by the passed snapshot. It is the responsibility of the
+/// Get a [`Scan`] over the table specified by the passed resolved_table. It is the responsibility of the
 /// _engine_ to free this scan when complete by calling [`free_scan`].
 ///
 /// # Safety
 ///
-/// Caller is responsible for passing a valid snapshot pointer, and engine pointer
+/// Caller is responsible for passing a valid resolved_table pointer, and engine pointer
 #[no_mangle]
 pub unsafe extern "C" fn scan(
-    snapshot: Handle<SharedResolvedTable>,
+    resolved_table: Handle<SharedResolvedTable>,
     engine: Handle<SharedExternEngine>,
     predicate: Option<&mut EnginePredicate>,
 ) -> ExternResult<Handle<SharedScan>> {
-    let snapshot = unsafe { snapshot.clone_as_arc() };
-    scan_impl(snapshot, predicate).into_extern_result(&engine.as_ref())
+    let resolved_table = unsafe { resolved_table.clone_as_arc() };
+    scan_impl(resolved_table, predicate).into_extern_result(&engine.as_ref())
 }
 
 fn scan_impl(
-    snapshot: Arc<ResolvedTable>,
+    resolved_table: Arc<ResolvedTable>,
     predicate: Option<&mut EnginePredicate>,
 ) -> DeltaResult<Handle<SharedScan>> {
-    let mut scan_builder = snapshot.scan_builder();
+    let mut scan_builder = resolved_table.scan_builder();
     if let Some(predicate) = predicate {
         let mut visitor_state = KernelExpressionVisitorState::default();
         let pred_id = (predicate.visitor)(predicate.predicate, &mut visitor_state);

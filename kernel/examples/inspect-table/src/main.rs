@@ -189,21 +189,21 @@ fn try_main() -> DeltaResult<()> {
         Arc::new(TokioBackgroundExecutor::new()),
     )?;
 
-    let snapshot = ResolvedTable::try_new(url, &engine, None)?;
-    println!("Reading {}", snapshot.table_root());
+    let resolved_table = ResolvedTable::try_new(url, &engine, None)?;
+    println!("Reading {}", resolved_table.table_root());
 
     match cli.command {
         Commands::TableVersion => {
-            println!("Latest table version: {}", snapshot.version());
+            println!("Latest table version: {}", resolved_table.version());
         }
         Commands::Metadata => {
-            println!("{:#?}", snapshot.metadata());
+            println!("{:#?}", resolved_table.metadata());
         }
         Commands::Schema => {
-            println!("{:#?}", snapshot.schema());
+            println!("{:#?}", resolved_table.schema());
         }
         Commands::ScanMetadata => {
-            let scan = ScanBuilder::new(snapshot).build()?;
+            let scan = ScanBuilder::new(resolved_table).build()?;
             let scan_metadata_iter = scan.scan_metadata(&engine)?;
             for res in scan_metadata_iter {
                 let scan_metadata = res?;
@@ -212,7 +212,7 @@ fn try_main() -> DeltaResult<()> {
         }
         Commands::Actions { oldest_first } => {
             let log_schema = get_log_schema();
-            let actions = snapshot.log_segment().read_actions(
+            let actions = resolved_table.log_segment().read_actions(
                 &engine,
                 log_schema.clone(),
                 log_schema.clone(),

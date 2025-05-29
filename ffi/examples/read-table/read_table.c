@@ -119,15 +119,15 @@ void visit_partition(void* context, const KernelStringSlice partition)
 }
 
 // Build a list of partition column names.
-PartitionList* get_partition_list(SharedSnapshot* snapshot)
+PartitionList* get_partition_list(SharedSnapshot* resolved_table)
 {
   print_diag("Building list of partition columns\n");
-  uintptr_t count = get_partition_column_count(snapshot);
+  uintptr_t count = get_partition_column_count(resolved_table);
   PartitionList* list = malloc(sizeof(PartitionList));
   // We set the `len` to 0 here and use it to track how many items we've added to the list
   list->len = 0;
   list->cols = malloc(sizeof(char*) * count);
-  StringSliceIterator* part_iter = get_partition_columns(snapshot);
+  StringSliceIterator* part_iter = get_partition_columns(resolved_table);
   for (;;) {
     bool has_next = string_slice_next(part_iter, list, visit_partition);
     if (!has_next) {
@@ -254,27 +254,27 @@ int main(int argc, char* argv[])
 
   SharedExternEngine* engine = engine_res.ok;
 
-  ExternResultHandleSharedSnapshot snapshot_res = snapshot(table_path_slice, engine);
-  if (snapshot_res.tag != OkHandleSharedSnapshot) {
-    print_error("Failed to create snapshot.", (Error*)snapshot_res.err);
-    free_error((Error*)snapshot_res.err);
+  ExternResultHandleSharedSnapshot resolved_table_res = resolved_table(table_path_slice, engine);
+  if (resolved_table_res.tag != OkHandleSharedSnapshot) {
+    print_error("Failed to create resolved_table.", (Error*)resolved_table_res.err);
+    free_error((Error*)resolved_table_res.err);
     return -1;
   }
 
-  SharedSnapshot* snapshot = snapshot_res.ok;
+  SharedSnapshot* resolved_table = resolved_table_res.ok;
 
-  uint64_t v = version(snapshot);
+  uint64_t v = version(resolved_table);
   printf("version: %" PRIu64 "\n\n", v);
-  print_schema(snapshot);
+  print_schema(resolved_table);
 
-  char* table_root = snapshot_table_root(snapshot, allocate_string);
+  char* table_root = resolved_table_table_root(resolved_table, allocate_string);
   print_diag("Table root: %s\n", table_root);
 
-  PartitionList* partition_cols = get_partition_list(snapshot);
+  PartitionList* partition_cols = get_partition_list(resolved_table);
 
   print_diag("Starting table scan\n\n");
 
-  ExternResultHandleSharedScan scan_res = scan(snapshot, engine, NULL);
+  ExternResultHandleSharedScan scan_res = scan(resolved_table, engine, NULL);
   if (scan_res.tag != OkHandleSharedScan) {
     printf("Failed to create scan\n");
     return -1;
@@ -336,7 +336,7 @@ int main(int argc, char* argv[])
   free_schema(logical_schema);
   free_schema(read_schema);
   free_global_scan_state(global_state);
-  free_snapshot(snapshot);
+  free_resolved_table(resolved_table);
   free_engine(engine);
   free(context.table_root);
   free_partition_list(context.partition_cols);

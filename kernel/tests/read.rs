@@ -66,8 +66,8 @@ async fn single_commit_two_add_files() -> Result<(), Box<dyn std::error::Error>>
 
     let expected_data = vec![batch.clone(), batch];
 
-    let snapshot = ResolvedTable::try_new(location, engine.as_ref(), None)?;
-    let scan = snapshot.into_scan_builder().build()?;
+    let resolved_table = ResolvedTable::try_new(location, engine.as_ref(), None)?;
+    let scan = resolved_table.into_scan_builder().build()?;
 
     let mut files = 0;
     let stream = scan.execute(engine)?.zip(expected_data);
@@ -118,8 +118,8 @@ async fn two_commits() -> Result<(), Box<dyn std::error::Error>> {
 
     let expected_data = vec![batch.clone(), batch];
 
-    let snapshot = ResolvedTable::try_new(location, &engine, None)?;
-    let scan = snapshot.into_scan_builder().build()?;
+    let resolved_table = ResolvedTable::try_new(location, &engine, None)?;
+    let scan = resolved_table.into_scan_builder().build()?;
 
     let mut files = 0;
     let stream = scan.execute(Arc::new(engine))?.zip(expected_data);
@@ -171,8 +171,8 @@ async fn remove_action() -> Result<(), Box<dyn std::error::Error>> {
 
     let expected_data = vec![batch];
 
-    let snapshot = ResolvedTable::try_new(location, &engine, None)?;
-    let scan = snapshot.into_scan_builder().build()?;
+    let resolved_table = ResolvedTable::try_new(location, &engine, None)?;
+    let scan = resolved_table.into_scan_builder().build()?;
 
     let stream = scan.execute(Arc::new(engine))?.zip(expected_data);
 
@@ -242,7 +242,7 @@ async fn stats() -> Result<(), Box<dyn std::error::Error>> {
         storage.clone(),
         Arc::new(TokioBackgroundExecutor::new()),
     ));
-    let snapshot = Arc::new(ResolvedTable::try_new(location, engine.as_ref(), None)?);
+    let resolved_table = Arc::new(ResolvedTable::try_new(location, engine.as_ref(), None)?);
 
     // The first file has id between 1 and 3; the second has id between 5 and 7. For each operator,
     // we validate the boundary values where we expect the set of matched files to change.
@@ -284,7 +284,7 @@ async fn stats() -> Result<(), Box<dyn std::error::Error>> {
     ];
     for (pred_fn, value, expected_batches) in test_cases {
         let predicate = pred_fn(column_expr!("id"), Expr::literal(value));
-        let scan = snapshot
+        let scan = resolved_table
             .clone()
             .scan_builder()
             .with_predicate(Arc::new(predicate.clone()))
@@ -430,17 +430,17 @@ fn read_table_data(
         Arc::new(TokioBackgroundExecutor::new()),
     )?);
 
-    let snapshot = ResolvedTable::try_new(url.clone(), engine.as_ref(), None)?;
+    let resolved_table = ResolvedTable::try_new(url.clone(), engine.as_ref(), None)?;
 
     let read_schema = select_cols.map(|select_cols| {
-        let table_schema = snapshot.schema();
+        let table_schema = resolved_table.schema();
         let selected_fields = select_cols
             .iter()
             .map(|col| table_schema.field(col).cloned().unwrap());
         Arc::new(Schema::new(selected_fields))
     });
     println!("Read {url:?} with schema {read_schema:#?} and predicate {predicate:#?}");
-    let scan = snapshot
+    let scan = resolved_table
         .into_scan_builder()
         .with_schema_opt(read_schema)
         .with_predicate(predicate.clone())
@@ -1054,10 +1054,10 @@ async fn predicate_on_non_nullable_partition_column() -> Result<(), Box<dyn std:
         storage.clone(),
         Arc::new(TokioBackgroundExecutor::new()),
     ));
-    let snapshot = Arc::new(ResolvedTable::try_new(location, engine.as_ref(), None)?);
+    let resolved_table = Arc::new(ResolvedTable::try_new(location, engine.as_ref(), None)?);
 
     let predicate = Pred::eq(column_expr!("id"), Expr::literal(2));
-    let scan = snapshot
+    let scan = resolved_table
         .scan_builder()
         .with_predicate(Arc::new(predicate))
         .build()?;
@@ -1116,10 +1116,10 @@ async fn predicate_on_non_nullable_column_missing_stats() -> Result<(), Box<dyn 
         storage.clone(),
         Arc::new(TokioBackgroundExecutor::new()),
     ));
-    let snapshot = Arc::new(ResolvedTable::try_new(location, engine.as_ref(), None)?);
+    let resolved_table = Arc::new(ResolvedTable::try_new(location, engine.as_ref(), None)?);
 
     let predicate = Pred::eq(column_expr!("val"), Expr::literal("g"));
-    let scan = snapshot
+    let scan = resolved_table
         .scan_builder()
         .with_predicate(Arc::new(predicate))
         .build()?;
