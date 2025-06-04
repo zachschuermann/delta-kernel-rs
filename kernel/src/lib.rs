@@ -87,6 +87,9 @@ pub mod table_features;
 pub mod table_properties;
 pub mod transaction;
 
+mod resolved_table;
+pub use resolved_table::*;
+
 mod arrow_compat;
 #[cfg(any(feature = "arrow-54", feature = "arrow-55"))]
 pub use arrow_compat::*;

@@ -26,9 +26,8 @@ use crate::schema::{
     ArrayType, DataType, MapType, PrimitiveType, Schema, SchemaRef, SchemaTransform, StructField,
     StructType,
 };
-use crate::snapshot::Snapshot;
 use crate::table_features::ColumnMappingMode;
-use crate::{DeltaResult, Engine, EngineData, Error, FileMeta, Version};
+use crate::{DeltaResult, Engine, EngineData, Error, FileMeta, ResolvedTable, Version};
 
 use self::log_replay::scan_action_iter;
 use self::state::GlobalScanState;
@@ -44,7 +43,7 @@ static CHECKPOINT_READ_SCHEMA: LazyLock<SchemaRef> =
 
 /// Builder to scan a snapshot of a table.
 pub struct ScanBuilder {
-    snapshot: Arc<Snapshot>,
+    resolved_table: Arc<dyn ResolvedTable>,
     schema: Option<SchemaRef>,
     predicate: Option<PredicateRef>,
 }
@@ -60,9 +59,9 @@ impl std::fmt::Debug for ScanBuilder {
 
 impl ScanBuilder {
     /// Create a new [`ScanBuilder`] instance.
-    pub fn new(snapshot: impl Into<Arc<Snapshot>>) -> Self {
+    pub fn new(resolved_table: Arc<dyn ResolvedTable>) -> Self {
         Self {
-            snapshot: snapshot.into(),
+            resolved_table: resolved_table.into(),
             schema: None,
             predicate: None,
         }
@@ -108,10 +107,10 @@ impl ScanBuilder {
     /// perform actual data reads.
     pub fn build(self) -> DeltaResult<Scan> {
         // if no schema is provided, use snapshot's entire schema (e.g. SELECT *)
-        let logical_schema = self.schema.unwrap_or_else(|| self.snapshot.schema());
+        let logical_schema = self.schema.unwrap_or_else(|| self.resolved_table.schema());
         let state_info = get_state_info(
             logical_schema.as_ref(),
-            &self.snapshot.metadata().partition_columns,
+            &self.resolved_table.metadata().partition_columns,
         )?;
 
         let physical_predicate = match self.predicate {
@@ -120,7 +119,7 @@ impl ScanBuilder {
         };
 
         Ok(Scan {
-            snapshot: self.snapshot,
+            resolved_table: self.resolved_table,
             logical_schema,
             physical_schema: Arc::new(StructType::new(state_info.read_fields)),
             physical_predicate,
@@ -379,7 +378,7 @@ impl HasSelectionVector for ScanMetadata {
 /// The result of building a scan over a table. This can be used to get the actual data from
 /// scanning the table.
 pub struct Scan {
-    snapshot: Arc<Snapshot>,
+    resolved_table: Arc<dyn ResolvedTable>,
     logical_schema: SchemaRef,
     physical_schema: SchemaRef,
     physical_predicate: PhysicalPredicate,
@@ -521,11 +520,11 @@ impl Scan {
 
         // TODO(#966): validate that the current predicate is compatible with the hint predicate.
 
-        if existing_version > self.snapshot.version() {
+        if existing_version > self.resolved_table.version() {
             return Err(Error::Generic(format!(
                 "existing_version {} is greater than current version {}",
                 existing_version,
-                self.snapshot.version()
+                self.resolved_table.version()
             )));
         }
 
@@ -542,12 +541,12 @@ impl Scan {
 
         // If the snapshot version corresponds to the hint version, we process the existing data
         // to apply file skipping and provide the required transformations.
-        if existing_version == self.snapshot.version() {
+        if existing_version == self.resolved_table.version() {
             let scan = existing_data.into_iter().map(apply_transform);
             return Ok(Box::new(self.scan_metadata_inner(engine, scan)?));
         }
 
-        let log_segment = self.snapshot.log_segment();
+        let log_segment = self.resolved_table.log_segment();
 
         // If the current log segment contains a checkpoint newer than the hint version
         // we disregard the existing data hint, and perform a full scan. The current log segment
@@ -594,7 +593,7 @@ impl Scan {
         // needed (currently just means no partition cols AND no column mapping but will be extended
         // for other transforms as we support them)
         let static_transform = (self.have_partition_cols
-            || self.snapshot.column_mapping_mode() != ColumnMappingMode::None)
+            || self.resolved_table.column_mapping_mode() != ColumnMappingMode::None)
             .then(|| Arc::new(Scan::get_static_transform(&self.all_fields)));
         let physical_predicate = match self.physical_predicate.clone() {
             PhysicalPredicate::StaticSkipAll => return Ok(None.into_iter().flatten()),
@@ -618,7 +617,7 @@ impl Scan {
     ) -> DeltaResult<impl Iterator<Item = DeltaResult<(Box<dyn EngineData>, bool)>> + Send> {
         // NOTE: We don't pass any meta-predicate because we expect no meaningful row group skipping
         // when ~every checkpoint file will contain the adds and removes we are looking for.
-        self.snapshot.log_segment().read_actions(
+        self.resolved_table.log_segment().read_actions(
             engine,
             COMMIT_READ_SCHEMA.clone(),
             CHECKPOINT_READ_SCHEMA.clone(),
@@ -630,8 +629,8 @@ impl Scan {
     /// only be called once per scan.
     pub fn global_scan_state(&self) -> GlobalScanState {
         GlobalScanState {
-            table_root: self.snapshot.table_root().to_string(),
-            partition_columns: self.snapshot.metadata().partition_columns.clone(),
+            table_root: self.resolved_table.table_root().to_string(),
+            partition_columns: self.resolved_table.metadata().partition_columns.clone(),
             logical_schema: self.logical_schema.clone(),
             physical_schema: self.physical_schema.clone(),
         }
@@ -678,7 +677,7 @@ impl Scan {
         );
 
         let global_state = Arc::new(self.global_scan_state());
-        let table_root = self.snapshot.table_root().clone();
+        let table_root = self.resolved_table.table_root().clone();
 
         let scan_metadata_iter = self.scan_metadata(engine.as_ref())?;
         let scan_files_iter = scan_metadata_iter

@@ -15,7 +15,10 @@ use crate::table_features::ColumnMappingMode;
 use crate::table_properties::TableProperties;
 use crate::transaction::Transaction;
 use crate::utils::try_parse_uri;
-use crate::{DeltaResult, Engine, Error, StorageHandler, Version};
+use crate::{
+    CommitResult, DeltaResult, Engine, EngineData, Error, LogProvider, ProtocolMetadata,
+    ResolvedTable, StorageHandler, UnresolvedTable, Version, Versioned,
+};
 use delta_kernel_derive::internal_api;
 
 use serde::{Deserialize, Serialize};
@@ -36,6 +39,38 @@ pub(crate) const LAST_CHECKPOINT_FILE_NAME: &str = "_last_checkpoint";
 pub struct Snapshot {
     log_segment: LogSegment,
     table_configuration: TableConfiguration,
+}
+
+impl UnresolvedTable for Snapshot {
+    fn table_root(&self) -> &Url {
+        self.table_configuration.table_root()
+    }
+
+    fn commit(&self, _actions: &dyn Iterator<Item = Box<dyn EngineData>>) -> CommitResult {
+        todo!("basically just put our existing put-if-absent commit code here")
+    }
+}
+
+impl Versioned for Snapshot {
+    fn version(&self) -> Version {
+        self.table_configuration.version()
+    }
+}
+
+impl ProtocolMetadata for Snapshot {
+    fn protocol(&self) -> &Protocol {
+        self.table_configuration.protocol()
+    }
+
+    fn metadata(&self) -> &Metadata {
+        self.table_configuration.metadata()
+    }
+}
+
+impl LogProvider for Snapshot {
+    fn log_segment(&self) -> &LogSegment {
+        &self.log_segment
+    }
 }
 
 impl Drop for Snapshot {
@@ -348,10 +383,10 @@ impl Snapshot {
         ScanBuilder::new(self)
     }
 
-    /// Consume this `Snapshot` to create a [`ScanBuilder`]
-    pub fn into_scan_builder(self) -> ScanBuilder {
-        ScanBuilder::new(self)
-    }
+    // /// Consume this `Snapshot` to create a [`ScanBuilder`]
+    // pub fn into_scan_builder(self) -> ScanBuilder {
+    //     ScanBuilder::new(self)
+    // }
 
     /// Create a [`Transaction`] for this `Arc<Snapshot>`.
     pub fn transaction(self: Arc<Self>) -> DeltaResult<Transaction> {
