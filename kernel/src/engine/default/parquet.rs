@@ -265,7 +265,18 @@ impl FileOpener for ParquetOpener {
 
         Ok(Box::pin(async move {
             #[cfg(feature = "arrow-55")]
-            let mut reader = ParquetObjectReader::new(store, path);
+            use crate::object_store::azure::MicrosoftAzure;
+            use std::any::Any;
+            // HACK: unfortunately, `ParquetObjectReader` under the hood does a suffix GET which
+            // isn't supported by Azure. For now we just detect if the store is backed by Azure and
+            // if so, do a HEAD request so we can pass in file size to the reader which will cause
+            // the reader to avoid a suffix GET.
+            let mut reader = if (&store.clone() as &dyn Any).is::<MicrosoftAzure>() {
+                let meta = store.head(&path).await?;
+                ParquetObjectReader::new(store, path).with_file_size(meta.size)
+            } else {
+                ParquetObjectReader::new(store, path)
+            };
             #[cfg(all(feature = "arrow-54", not(feature = "arrow-55")))]
             let mut reader = {
                 // TODO avoid IO by converting passed file meta to ObjectMeta (no longer an issue
