@@ -267,10 +267,11 @@ impl FileOpener for ParquetOpener {
             #[cfg(feature = "arrow-55")]
             use crate::object_store::azure::MicrosoftAzure;
             use crate::AsAny;
-            // HACK: unfortunately, `ParquetObjectReader` under the hood does a suffix GET which
-            // isn't supported by Azure. For now we just detect if the store is backed by Azure and
-            // if so, do a HEAD request so we can pass in file size to the reader which will cause
-            // the reader to avoid a suffix GET.
+            // HACK: unfortunately, `ParquetObjectReader` under the hood does a suffix range
+            // request which isn't supported by Azure. For now we just detect if the store is backed
+            // by Azure and if so, do a HEAD request so we can pass in file size to the reader which
+            // will cause the reader to avoid a suffix range request.
+            // see also: https://github.com/delta-io/delta-kernel-rs/issues/968
             let mut reader = if store.any_ref().is::<MicrosoftAzure>() {
                 let meta = store.head(&path).await?;
                 ParquetObjectReader::new(store, path).with_file_size(meta.size)
