@@ -314,7 +314,9 @@ fn read_with_execute(
     scan: &Scan,
     expected: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let result_schema = Arc::new(ArrowSchema::try_from_kernel(scan.schema().as_ref())?);
+    let result_schema = Arc::new(ArrowSchema::try_from_kernel(
+        scan.logical_schema().as_ref(),
+    )?);
     let batches = read_scan(scan, engine)?;
 
     if expected.is_empty() {
@@ -356,8 +358,9 @@ fn read_with_scan_metadata(
     scan: &Scan,
     expected: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let global_state = scan.global_scan_state();
-    let result_schema = Arc::new(ArrowSchema::try_from_kernel(scan.schema().as_ref())?);
+    let result_schema = Arc::new(ArrowSchema::try_from_kernel(
+        scan.logical_schema().as_ref(),
+    )?);
     let scan_metadata = scan.scan_metadata(engine)?;
     let mut scan_files = vec![];
     for res in scan_metadata {
@@ -381,7 +384,7 @@ fn read_with_scan_metadata(
             .parquet_handler()
             .read_parquet_files(
                 &[meta],
-                global_state.physical_schema.clone(),
+                scan.physical_schema().clone(),
                 scan.physical_predicate().clone(),
             )
             .unwrap();
@@ -393,8 +396,8 @@ fn read_with_scan_metadata(
             let logical = transform_to_logical(
                 engine,
                 read_result,
-                &global_state.physical_schema,
-                &global_state.logical_schema,
+                scan.physical_schema(),
+                scan.logical_schema(),
                 &scan_file.transform,
             )
             .unwrap();
@@ -1323,6 +1326,25 @@ fn timestamp_partitioned_table() -> Result<(), Box<dyn std::error::Error>> {
         "+----+-----+---+----------------------+",
     ];
     let test_name = "timestamp-partitioned-table";
+    let test_dir = common::load_test_data("./tests/data", test_name).unwrap();
+    let test_path = test_dir.path().join(test_name);
+    read_table_data_str(test_path.to_str().unwrap(), None, None, expected)
+}
+
+#[test]
+fn compacted_log_files_table() -> Result<(), Box<dyn std::error::Error>> {
+    let expected = vec![
+        "+----+--------------------+",
+        "| id | comment            |",
+        "+----+--------------------+",
+        "| 0  | new                |",
+        "| 1  | after-large-delete |",
+        "| 2  |                    |",
+        "| 10 | merge1-insert      |",
+        "| 12 | merge2-insert      |",
+        "+----+--------------------+",
+    ];
+    let test_name = "compacted-log-files-table";
     let test_dir = common::load_test_data("./tests/data", test_name).unwrap();
     let test_path = test_dir.path().join(test_name);
     read_table_data_str(test_path.to_str().unwrap(), None, None, expected)

@@ -39,7 +39,7 @@ mod tests;
 /// - `OR` is rewritten only if all operands are eligible for data skipping. Otherwise, the whole OR
 ///   predicate is dropped.
 #[cfg(test)]
-fn as_data_skipping_predicate(pred: &Pred) -> Option<Pred> {
+pub(crate) fn as_data_skipping_predicate(pred: &Pred) -> Option<Pred> {
     DataSkippingPredicateCreator.eval(pred)
 }
 
@@ -202,8 +202,13 @@ impl DataSkippingPredicateEvaluator for DataSkippingPredicateCreator {
     }
 
     /// Retrieves the maximum value of a column, if it exists and has the requested type.
-    fn get_max_stat(&self, col: &ColumnName, _data_type: &DataType) -> Option<Expr> {
-        Some(joined_column_expr!("maxValues", col))
+    // TODO(#1002): we currently don't support file skipping on timestamp columns' max stat since
+    // they are truncated to milliseconds in add.stats.
+    fn get_max_stat(&self, col: &ColumnName, data_type: &DataType) -> Option<Expr> {
+        match data_type {
+            &DataType::TIMESTAMP | &DataType::TIMESTAMP_NTZ => None,
+            _ => Some(joined_column_expr!("maxValues", col)),
+        }
     }
 
     /// Retrieves the null count of a column, if it exists.

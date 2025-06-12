@@ -16,14 +16,14 @@ use crate::schema::SchemaRef;
 use crate::snapshot::LastCheckpointHint;
 use crate::utils::require;
 use crate::{
-    DeltaResult, Engine, EngineData, Error, Expression, ParquetHandler, Predicate, PredicateRef,
-    RowVisitor, StorageHandler, Version,
+    DeltaResult, Engine, EngineData, Error, Expression, FileMeta, ParquetHandler, Predicate,
+    PredicateRef, RowVisitor, StorageHandler, Version,
 };
 use delta_kernel_derive::internal_api;
 
 use crate::actions::crc::ProtocolMetadata;
 use itertools::Itertools;
-use tracing::warn;
+use tracing::{debug, warn};
 use url::Url;
 
 #[cfg(test)]
@@ -77,6 +77,7 @@ impl LogSegment {
             checkpoint_file.version
         });
 
+        // TODO: consider unifying this with debug_asserts in the ListedLogFiles::new(); issue#995
         // We require that commits that are contiguous. In other words, there must be no gap between commit versions.
         require!(
             ascending_commit_files
@@ -198,12 +199,12 @@ impl LogSegment {
                 start_version
             ))
         );
-        let listed_files = ListedLogFiles {
+        let listed_files = ListedLogFiles::new(
             ascending_commit_files,
-            ascending_compaction_files: vec![],
-            checkpoint_parts: vec![],
-            latest_crc_file: None, // TODO: use CRC files for table changes?
-        };
+            vec![],
+            vec![],
+            None, // TODO: use CRC files for table changes?
+        );
         LogSegment::try_new(listed_files, log_root, end_version)
     }
 
@@ -227,23 +228,64 @@ impl LogSegment {
         checkpoint_read_schema: SchemaRef,
         meta_predicate: Option<PredicateRef>,
     ) -> DeltaResult<impl Iterator<Item = DeltaResult<ActionsBatch>> + Send> {
-        // `replay` expects commit files to be sorted in descending order, so we reverse the sorted
-        // commit files
-        let commit_files: Vec<_> = self
-            .ascending_commit_files
-            .iter()
-            .rev()
-            .map(|f| f.location.clone())
-            .collect();
+        // `replay` expects commit files to be sorted in descending order, so the return value here is correct
+        let commits_and_compactions = self.find_commit_cover();
         let commit_stream = engine
             .json_handler()
-            .read_json_files(&commit_files, commit_read_schema, meta_predicate.clone())?
+            .read_json_files(
+                &commits_and_compactions,
+                commit_read_schema,
+                meta_predicate.clone(),
+            )?
             .map_ok(|batch| ActionsBatch::new(batch, true));
 
         let checkpoint_stream =
             self.create_checkpoint_stream(engine, checkpoint_read_schema, meta_predicate)?;
 
         Ok(commit_stream.chain(checkpoint_stream))
+    }
+
+    /// find a minimal set to cover the range of commits we want. This is greedy so not always
+    /// optimal, but we assume there are rarely overlapping compactions so this is okay. NB: This
+    /// returns files is DESCENDING ORDER, as that's what `replay` expects. This function assumes
+    /// that all files in `self.ascending_commit_files` and `self.ascending_compaction_files` are in
+    /// range for this log segment. This invariant is maintained by our listing code.
+    fn find_commit_cover(&self) -> Vec<FileMeta> {
+        // Create an iterator sorted in ascending order by (initial version, end version), e.g.
+        // [00.json, 00.09.compacted.json, 00.99.compacted.json, 01.json, 02.json, ..., 10.json,
+        //  10.19.compacted.json, 11.json, ...]
+        let all_files = itertools::Itertools::merge_by(
+            self.ascending_commit_files.iter(),
+            self.ascending_compaction_files.iter(),
+            |path_a, path_b| path_a.version <= path_b.version,
+        );
+
+        let mut last_pushed: Option<&ParsedLogPath> = None;
+
+        let mut selected_files = vec![];
+        for next in all_files {
+            match last_pushed {
+                // Resolve version number ties in favor of the later file (it covers a wider range)
+                Some(prev) if prev.version == next.version => {
+                    let removed = selected_files.pop();
+                    debug!("Selecting {next:?} rather than {removed:?}, it covers a wider range");
+                }
+                // Skip later files whose start overlaps with the previous end
+                Some(&ParsedLogPath {
+                    file_type: LogPathFileType::CompactedCommit { hi },
+                    ..
+                }) if next.version <= hi => {
+                    debug!("Skipping log file {next:?}, it's already covered.");
+                    continue;
+                }
+                _ => {} // just fall through
+            }
+            debug!("Provisionally selecting {next:?}");
+            last_pushed = Some(next);
+            selected_files.push(next.location.clone());
+        }
+        selected_files.reverse();
+        selected_files
     }
 
     /// Returns an iterator over checkpoint data, processing sidecar files when necessary.
@@ -523,13 +565,62 @@ fn list_log_files(
 /// to be sorted in ascending order by version. The elements of `checkpoint_parts` are all the parts
 /// of the same checkpoint. Checkpoint parts share the same version. The `latest_crc_file` includes
 /// the latest (highest version) CRC file, if any, which may not correspond to the latest commit.
-// TODO: debug asserts in a `new` method to enforce the above?
 #[derive(Debug)]
 pub(crate) struct ListedLogFiles {
     pub ascending_commit_files: Vec<ParsedLogPath>,
     pub ascending_compaction_files: Vec<ParsedLogPath>,
     pub checkpoint_parts: Vec<ParsedLogPath>,
     pub latest_crc_file: Option<ParsedLogPath>,
+}
+
+impl ListedLogFiles {
+    fn new(
+        ascending_commit_files: Vec<ParsedLogPath>,
+        ascending_compaction_files: Vec<ParsedLogPath>,
+        checkpoint_parts: Vec<ParsedLogPath>,
+        latest_crc_file: Option<ParsedLogPath>,
+    ) -> Self {
+        // We are adding debug_assertions here since we want to validate invariants that are (relatively) expensive to compute
+        #[cfg(debug_assertions)]
+        {
+            assert!(ascending_compaction_files
+                .windows(2)
+                .all(|pair| match pair {
+                    [ParsedLogPath {
+                        version: version0,
+                        file_type: LogPathFileType::CompactedCommit { hi: hi0 },
+                        ..
+                    }, ParsedLogPath {
+                        version: version1,
+                        file_type: LogPathFileType::CompactedCommit { hi: hi1 },
+                        ..
+                    }] => version0 < version1 || (version0 == version1 && hi0 <= hi1),
+                    _ => false,
+                }));
+
+            assert!(checkpoint_parts.iter().all(|part| part.is_checkpoint()));
+
+            // for a multi-part checkpoint, check that they are all same version and all the parts are there
+            if checkpoint_parts.len() > 1 {
+                assert!(checkpoint_parts
+                    .windows(2)
+                    .all(|pair| pair[0].version == pair[1].version));
+
+                assert!(checkpoint_parts.iter().all(|part| matches!(
+                    part.file_type,
+                    LogPathFileType::MultiPartCheckpoint { num_parts, .. }
+                    if checkpoint_parts.len() == num_parts as usize
+                )));
+            }
+        }
+
+        ListedLogFiles {
+            ascending_commit_files,
+            ascending_compaction_files,
+            checkpoint_parts,
+            latest_crc_file,
+        }
+    }
 }
 
 /// List all commit and checkpoint files with versions above the provided `start_version` (inclusive).
@@ -598,12 +689,12 @@ pub(crate) fn list_log_files_with_version(
             }
         }
 
-        ListedLogFiles {
+        ListedLogFiles::new(
             ascending_commit_files,
             ascending_compaction_files,
             checkpoint_parts,
             latest_crc_file,
-        }
+        )
     })
 }
 
