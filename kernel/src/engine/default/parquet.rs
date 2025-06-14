@@ -62,7 +62,7 @@ impl DataFileMetadata {
                     size,
                 },
         } = self;
-        let write_metadata_schema = crate::transaction::get_write_metadata_schema();
+        let write_metadata_schema = crate::transaction::get_file_metadata_schema();
 
         // create the record batch of the write metadata
         let path = Arc::new(StringArray::from(vec![location.to_string()]));
@@ -478,7 +478,7 @@ mod tests {
         let actual = ArrowEngineData::try_from_engine_data(actual).unwrap();
 
         let schema = Arc::new(
-            crate::transaction::get_write_metadata_schema()
+            crate::transaction::get_file_metadata_schema()
                 .as_ref()
                 .try_into_arrow()
                 .unwrap(),

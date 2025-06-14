@@ -437,7 +437,7 @@ async fn test_append() -> Result<(), Box<dyn std::error::Error>> {
 
         let write_metadata = futures::future::join_all(tasks).await.into_iter().flatten();
         for meta in write_metadata {
-            txn.add_write_metadata(meta?);
+            txn.add_files(meta?);
         }
 
         // commit!
@@ -575,7 +575,7 @@ async fn test_append_partitioned() -> Result<(), Box<dyn std::error::Error>> {
 
         let write_metadata = futures::future::join_all(tasks).await.into_iter().flatten();
         for meta in write_metadata {
-            txn.add_write_metadata(meta?);
+            txn.add_files(meta?);
         }
 
         // commit!
@@ -908,7 +908,7 @@ async fn test_append_timestamp_ntz() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await?;
 
-    txn.add_write_metadata(write_metadata);
+    txn.add_files(write_metadata);
 
     // Commit the transaction
     txn.commit(engine.as_ref())?;
