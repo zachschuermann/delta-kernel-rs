@@ -18,7 +18,7 @@ use url::Url;
 const KERNEL_VERSION: &str = env!("CARGO_PKG_VERSION");
 const UNKNOWN_OPERATION: &str = "UNKNOWN";
 
-pub(crate) static FILE_METADATA_SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| {
+pub(crate) static ADD_FILES_SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| {
     Arc::new(StructType::new(vec![
         StructField::not_null("path", DataType::STRING),
         StructField::not_null(
@@ -32,13 +32,13 @@ pub(crate) static FILE_METADATA_SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| {
 });
 
 /// This function specifies the schema for the add_files metadata (and soon remove_files metadata).
-/// Concretenly, it is the expected schema for engine data passed to [`add_files`].
+/// Concretely, it is the expected schema for engine data passed to [`add_files`].
 ///
 /// Each row represents metadata about a file to be added to the table.
 ///
 /// [`add_files`]: crate::transaction::Transaction::add_files
-pub fn file_metadata_schema() -> &'static SchemaRef {
-    &FILE_METADATA_SCHEMA
+pub fn add_files_schema() -> &'static SchemaRef {
+    &ADD_FILES_SCHEMA
 }
 
 /// A transaction represents an in-progress write to a table. After creating a transaction, changes
@@ -234,7 +234,7 @@ impl Transaction {
     /// add/append/insert data (files) to the table. Note that this API can be called multiple times
     /// to add multiple batches.
     ///
-    /// The expected schema for `add_metadata` is given by [`file_metadata_schema`].
+    /// The expected schema for `add_metadata` is given by [`add_files_schema`].
     pub fn add_files(&mut self, add_metadata: Box<dyn EngineData>) {
         self.add_files_metadata.push(add_metadata);
     }
@@ -247,17 +247,17 @@ fn generate_adds<'a>(
     add_files_metadata: impl Iterator<Item = &'a dyn EngineData> + Send + 'a,
 ) -> impl Iterator<Item = DeltaResult<Box<dyn EngineData>>> + Send + 'a {
     let evaluation_handler = engine.evaluation_handler();
-    let file_metadata_schema = file_metadata_schema();
+    let add_files_schema = add_files_schema();
     let log_schema = get_log_add_schema();
 
     add_files_metadata.map(move |add_files_batch| {
         let adds_expr = Expression::struct_from([Expression::struct_from(
-            file_metadata_schema
+            add_files_schema
                 .fields()
                 .map(|f| Expression::column([f.name()])),
         )]);
         let adds_evaluator = evaluation_handler.new_expression_evaluator(
-            file_metadata_schema.clone(),
+            add_files_schema.clone(),
             adds_expr,
             log_schema.clone().into(),
         );
@@ -719,8 +719,8 @@ mod tests {
     }
 
     #[test]
-    fn test_file_metadata_schema() {
-        let schema = file_metadata_schema();
+    fn test_add_files_schema() {
+        let schema = add_files_schema();
         let expected = StructType::new(vec![
             StructField::not_null("path", DataType::STRING),
             StructField::not_null(
