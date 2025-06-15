@@ -21,8 +21,8 @@ use delta_kernel::engine::arrow_conversion::TryIntoArrow as _;
 use delta_kernel::engine::arrow_data::ArrowEngineData;
 use delta_kernel::engine::default::executor::tokio::TokioBackgroundExecutor;
 use delta_kernel::engine::default::DefaultEngine;
-use delta_kernel::schema::{DataType, SchemaRef, StructField, StructType};
-use delta_kernel::Error as KernelError;
+use delta_kernel::schema::{DataType, MapType, SchemaRef, StructField, StructType};
+use delta_kernel::{transaction, Error as KernelError};
 use delta_kernel::{DeltaResult, Table};
 
 mod common;
@@ -951,7 +951,7 @@ async fn test_remove() -> Result<(), Box<dyn std::error::Error>> {
 
         let mut txn = table
             .new_transaction(&engine)?
-            .with_commit_info(commit_info);
+            .with_commit_info(commit_info.clone());
 
         // create two new arrow record batches to append
         let append_data = [[1, 2, 3], [4, 5, 6]].map(|data| -> DeltaResult<_> {
@@ -981,84 +981,43 @@ async fn test_remove() -> Result<(), Box<dyn std::error::Error>> {
             })
         });
 
-        let add_files_metadata = futures::future::join_all(tasks).await.into_iter().flatten();
-        for meta in add_files_metadata {
-            let meta = meta?;
-            let arrow = ArrowEngineData::try_from_engine_data(meta).unwrap();
-            txn.add_files(arrow.clone());
-            txn.remove_files(arrow);
-        }
-
-        // commit!
+        let mut add_files_metadata = futures::future::join_all(tasks).await.into_iter().flatten();
+        let meta = add_files_metadata.next().unwrap()?;
+        let arrow = ArrowEngineData::try_from_engine_data(meta).unwrap();
+        txn.add_files(arrow.clone());
         txn.commit(engine.as_ref())?;
 
-        let commit1 = store
-            .get(&Path::from(format!(
-                "/{table_name}/_delta_log/00000000000000000001.json"
-            )))
-            .await?;
+        let mut txn = table
+            .new_transaction(engine.as_ref())?
+            .with_commit_info(commit_info);
 
-        let mut parsed_commits: Vec<_> = Deserializer::from_slice(&commit1.bytes().await?)
-            .into_iter::<serde_json::Value>()
-            .try_collect()?;
+        use delta_kernel::{Engine, Expression};
 
-        let size =
-            get_and_check_all_parquet_sizes(store.clone(), format!("/{table_name}/").as_str())
-                .await;
-        // check that the timestamps in commit_info and add actions are within 10s of SystemTime::now()
-        // before we clear them for comparison
-        check_action_timestamps(parsed_commits.iter())?;
+        let expr = Expression::struct_from([
+            Expression::column(["path"]),
+            Expression::null_literal(DataType::LONG),
+            Expression::column(["dataChange"]),
+            Expression::null_literal(DataType::BOOLEAN),
+            Expression::null_literal(DataType::Map(Box::new(MapType::new(
+                DataType::STRING,
+                DataType::STRING,
+                true,
+            )))),
+            Expression::null_literal(DataType::LONG),
+        ]);
+        let eval = engine.evaluation_handler().new_expression_evaluator(
+            transaction::add_files_schema().clone(),
+            expr,
+            transaction::remove_files_schema().clone().into(),
+        );
+        let removes = eval.evaluate(arrow.as_ref()).unwrap();
+        txn.remove_files(removes);
+        txn.commit(engine.as_ref())?;
 
-        // set timestamps to 0 and paths to known string values for comparison
-        // (otherwise timestamps are non-deterministic and paths are random UUIDs)
-        set_value(&mut parsed_commits[0], "commitInfo.timestamp", json!(0))?;
-        set_value(&mut parsed_commits[1], "add.modificationTime", json!(0))?;
-        set_value(&mut parsed_commits[1], "add.path", json!("first.parquet"))?;
-        set_value(&mut parsed_commits[2], "add.modificationTime", json!(0))?;
-        set_value(&mut parsed_commits[2], "add.path", json!("second.parquet"))?;
-
-        let expected_commit = vec![
-            json!({
-                "commitInfo": {
-                    "timestamp": 0,
-                    "operation": "UNKNOWN",
-                    "kernelVersion": format!("v{}", env!("CARGO_PKG_VERSION")),
-                    "operationParameters": {},
-                    "engineCommitInfo": {
-                        "engineInfo": "default engine"
-                    }
-                }
-            }),
-            json!({
-                "add": {
-                    "path": "first.parquet",
-                    "partitionValues": {},
-                    "size": size,
-                    "modificationTime": 0,
-                    "dataChange": true
-                }
-            }),
-            json!({
-                "add": {
-                    "path": "second.parquet",
-                    "partitionValues": {},
-                    "size": size,
-                    "modificationTime": 0,
-                    "dataChange": true
-                }
-            }),
-        ];
-
-        assert_eq!(parsed_commits, expected_commit);
-
-        test_read(
-            &ArrowEngineData::new(RecordBatch::try_new(
-                Arc::new(schema.as_ref().try_into_arrow()?),
-                vec![Arc::new(Int32Array::from(vec![1, 2, 3, 4, 5, 6]))],
-            )?),
-            &table,
-            engine,
-        )?;
+        let snapshot = table.snapshot(engine.as_ref(), None)?;
+        let scan = snapshot.into_scan_builder().build()?;
+        let batches = common::read_scan(&scan, engine)?;
+        assert!(batches.is_empty());
     }
     Ok(())
 }
