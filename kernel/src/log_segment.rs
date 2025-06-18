@@ -11,8 +11,8 @@ use crate::actions::{
 };
 use crate::log_replay::ActionsBatch;
 use crate::path::{LogPathFileType, ParsedLogPath};
+use crate::resolved_table::LastCheckpointHint;
 use crate::schema::SchemaRef;
-use crate::snapshot::LastCheckpointHint;
 use crate::utils::require;
 use crate::{
     DeltaResult, Engine, EngineData, Error, Expression, FileMeta, ParquetHandler, Predicate,

@@ -11,8 +11,8 @@ use std::sync::Arc;
 use tracing::debug;
 use url::Url;
 
+use delta_kernel::resolved_table::Snapshot;
 use delta_kernel::schema::Schema;
-use delta_kernel::snapshot::Snapshot;
 use delta_kernel::{DeltaResult, Engine, EngineData, Table};
 use delta_kernel_ffi_macros::handle_descriptor;
 

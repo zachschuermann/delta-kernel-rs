@@ -8,7 +8,7 @@ use futures::stream::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use delta_kernel::snapshot::Snapshot;
+use delta_kernel::resolved_table::Snapshot;
 use delta_kernel::{Engine, Error, Table, Version};
 
 #[derive(Debug, thiserror::Error)]

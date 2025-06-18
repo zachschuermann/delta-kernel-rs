@@ -20,13 +20,13 @@ use crate::expressions::{ColumnName, Expression, ExpressionRef, Predicate, Predi
 use crate::kernel_predicates::{DefaultKernelPredicateEvaluator, EmptyColumnResolver};
 use crate::log_replay::{ActionsBatch, HasSelectionVector};
 use crate::log_segment::{ListedLogFiles, LogSegment};
+use crate::resolved_table::Snapshot;
 use crate::scan::state::{DvInfo, Stats};
 use crate::schema::ToSchema as _;
 use crate::schema::{
     ArrayType, DataType, MapType, PrimitiveType, Schema, SchemaRef, SchemaTransform, StructField,
     StructType,
 };
-use crate::snapshot::Snapshot;
 use crate::table_features::ColumnMappingMode;
 use crate::{DeltaResult, Engine, EngineData, Error, FileMeta, Version};
 

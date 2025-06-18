@@ -97,8 +97,8 @@ use crate::engine_data::FilteredEngineData;
 use crate::expressions::Scalar;
 use crate::log_replay::LogReplayProcessor;
 use crate::path::ParsedLogPath;
+use crate::resolved_table::{Snapshot, LAST_CHECKPOINT_FILE_NAME};
 use crate::schema::{DataType, SchemaRef, StructField, StructType, ToSchema as _};
-use crate::snapshot::{Snapshot, LAST_CHECKPOINT_FILE_NAME};
 use crate::{DeltaResult, Engine, EngineData, Error, EvaluationHandlerExtension, FileMeta};
 use log_replay::{CheckpointBatch, CheckpointLogReplayProcessor};
 

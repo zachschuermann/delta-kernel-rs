@@ -9,7 +9,7 @@ use std::sync::Arc;
 use url::Url;
 
 use crate::checkpoint::CheckpointWriter;
-use crate::snapshot::Snapshot;
+use crate::resolved_table::Snapshot;
 use crate::table_changes::TableChanges;
 use crate::transaction::Transaction;
 use crate::{DeltaResult, Engine, Error, Version};

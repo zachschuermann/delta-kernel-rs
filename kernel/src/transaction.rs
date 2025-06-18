@@ -9,8 +9,8 @@ use crate::actions::{get_log_add_schema, get_log_commit_info_schema, get_log_txn
 use crate::error::Error;
 use crate::expressions::{column_expr, Scalar, StructData};
 use crate::path::ParsedLogPath;
+use crate::resolved_table::Snapshot;
 use crate::schema::{MapType, SchemaRef, StructField, StructType};
-use crate::snapshot::Snapshot;
 use crate::{DataType, DeltaResult, Engine, EngineData, Expression, IntoEngineData, Version};
 
 use url::Url;
