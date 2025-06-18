@@ -129,8 +129,7 @@ pub(crate) fn get_log_domain_metadata_schema() -> &'static SchemaRef {
     derive(Serialize, Deserialize),
     serde(rename_all = "camelCase")
 )]
-#[internal_api]
-pub(crate) struct Format {
+pub struct Format {
     /// Name of the encoding for files in this table
     pub(crate) provider: String,
     /// A map containing configuration options for the format
@@ -152,8 +151,7 @@ impl Default for Format {
     derive(Serialize, Deserialize),
     serde(rename_all = "camelCase")
 )]
-#[internal_api]
-pub(crate) struct Metadata {
+pub struct Metadata {
     /// Unique identifier for this table
     pub(crate) id: String,
     /// User-provided identifier for this table
@@ -205,10 +203,9 @@ impl Metadata {
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, ToSchema, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[internal_api]
 // TODO move to another module so that we disallow constructing this struct without using the
 // try_new function.
-pub(crate) struct Protocol {
+pub struct Protocol {
     /// The minimum version of the Delta read protocol that a client must implement
     /// in order to correctly read this table
     min_reader_version: i32,

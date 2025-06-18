@@ -52,6 +52,15 @@ impl std::fmt::Debug for Snapshot {
     }
 }
 
+// every table must have this
+pub trait UnresolvedTable {
+    // table_root: Url
+}
+
+pub trait Versioned {
+    fn version(&self) -> Version;
+}
+
 impl Snapshot {
     fn new(log_segment: LogSegment, table_configuration: TableConfiguration) -> Self {
         Self {
