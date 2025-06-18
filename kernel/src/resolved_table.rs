@@ -31,18 +31,18 @@ pub(crate) const LAST_CHECKPOINT_FILE_NAME: &str = "_last_checkpoint";
 /// have a defined schema (which may change over time for any given table), specific version, and
 /// frozen log segment.
 #[derive(PartialEq, Eq)]
-pub struct Snapshot {
+pub struct ResolvedTable {
     log_segment: LogSegment,
     table_configuration: TableConfiguration,
 }
 
-impl Drop for Snapshot {
+impl Drop for ResolvedTable {
     fn drop(&mut self) {
         debug!("Dropping snapshot");
     }
 }
 
-impl std::fmt::Debug for Snapshot {
+impl std::fmt::Debug for ResolvedTable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Snapshot")
             .field("path", &self.log_segment.log_root.as_str())
@@ -81,7 +81,7 @@ pub trait Versioned {
 // }
 //
 
-impl Snapshot {
+impl ResolvedTable {
     fn new(log_segment: LogSegment, table_configuration: TableConfiguration) -> Self {
         Self {
             log_segment,
@@ -139,7 +139,7 @@ impl Snapshot {
     /// - `version`: target version of the [`Snapshot`]. None will create a snapshot at the latest
     ///   version of the table.
     pub fn try_new_from(
-        existing_snapshot: Arc<Snapshot>,
+        existing_snapshot: Arc<ResolvedTable>,
         engine: &dyn Engine,
         version: impl Into<Option<Version>>,
     ) -> DeltaResult<Arc<Self>> {
@@ -276,7 +276,7 @@ impl Snapshot {
             log_root,
             new_version,
         )?;
-        Ok(Arc::new(Snapshot::new(
+        Ok(Arc::new(ResolvedTable::new(
             combined_log_segment,
             table_configuration,
         )))
@@ -478,7 +478,7 @@ mod tests {
         let url = url::Url::from_directory_path(path).unwrap();
 
         let engine = SyncEngine::new();
-        let snapshot = Snapshot::try_new(url, &engine, Some(1)).unwrap();
+        let snapshot = ResolvedTable::try_new(url, &engine, Some(1)).unwrap();
 
         let expected =
             Protocol::try_new(3, 7, Some(["deletionVectors"]), Some(["deletionVectors"])).unwrap();
@@ -496,7 +496,7 @@ mod tests {
         let url = url::Url::from_directory_path(path).unwrap();
 
         let engine = SyncEngine::new();
-        let snapshot = Snapshot::try_new(url, &engine, None).unwrap();
+        let snapshot = ResolvedTable::try_new(url, &engine, None).unwrap();
 
         let expected =
             Protocol::try_new(3, 7, Some(["deletionVectors"]), Some(["deletionVectors"])).unwrap();
@@ -535,16 +535,16 @@ mod tests {
         let url = url::Url::from_directory_path(path).unwrap();
 
         let engine = SyncEngine::new();
-        let old_snapshot = Arc::new(Snapshot::try_new(url.clone(), &engine, Some(1)).unwrap());
+        let old_snapshot = Arc::new(ResolvedTable::try_new(url.clone(), &engine, Some(1)).unwrap());
         // 1. new version < existing version: error
-        let snapshot_res = Snapshot::try_new_from(old_snapshot.clone(), &engine, Some(0));
+        let snapshot_res = ResolvedTable::try_new_from(old_snapshot.clone(), &engine, Some(0));
         assert!(matches!(
             snapshot_res,
             Err(Error::Generic(msg)) if msg == "Requested snapshot version 0 is older than snapshot hint version 1"
         ));
 
         // 2. new version == existing version
-        let snapshot = Snapshot::try_new_from(old_snapshot.clone(), &engine, Some(1)).unwrap();
+        let snapshot = ResolvedTable::try_new_from(old_snapshot.clone(), &engine, Some(1)).unwrap();
         let expected = old_snapshot.clone();
         assert_eq!(snapshot, expected);
 
@@ -560,9 +560,9 @@ mod tests {
         fn test_new_from(store: Arc<InMemory>) -> DeltaResult<()> {
             let url = Url::parse("memory:///")?;
             let engine = DefaultEngine::new(store, Arc::new(TokioBackgroundExecutor::new()));
-            let base_snapshot = Arc::new(Snapshot::try_new(url.clone(), &engine, Some(0))?);
-            let snapshot = Snapshot::try_new_from(base_snapshot.clone(), &engine, Some(1))?;
-            let expected = Snapshot::try_new(url.clone(), &engine, Some(1))?;
+            let base_snapshot = Arc::new(ResolvedTable::try_new(url.clone(), &engine, Some(0))?);
+            let snapshot = ResolvedTable::try_new_from(base_snapshot.clone(), &engine, Some(1))?;
+            let expected = ResolvedTable::try_new(url.clone(), &engine, Some(1))?;
             assert_eq!(snapshot, expected.into());
             Ok(())
         }
@@ -607,13 +607,13 @@ mod tests {
             Arc::new(store.fork()),
             Arc::new(TokioBackgroundExecutor::new()),
         );
-        let base_snapshot = Arc::new(Snapshot::try_new(url.clone(), &engine, Some(0))?);
-        let snapshot = Snapshot::try_new_from(base_snapshot.clone(), &engine, None)?;
-        let expected = Snapshot::try_new(url.clone(), &engine, Some(0))?;
+        let base_snapshot = Arc::new(ResolvedTable::try_new(url.clone(), &engine, Some(0))?);
+        let snapshot = ResolvedTable::try_new_from(base_snapshot.clone(), &engine, None)?;
+        let expected = ResolvedTable::try_new(url.clone(), &engine, Some(0))?;
         assert_eq!(snapshot, expected.into());
         // version exceeds latest version of the table = err
         assert!(matches!(
-            Snapshot::try_new_from(base_snapshot.clone(), &engine, Some(1)),
+            ResolvedTable::try_new_from(base_snapshot.clone(), &engine, Some(1)),
             Err(Error::Generic(msg)) if msg == "Requested snapshot version 1 is newer than the latest version 0"
         ));
 
@@ -676,9 +676,9 @@ mod tests {
         // new commits AND request version > end of log
         let url = Url::parse("memory:///")?;
         let engine = DefaultEngine::new(store_3c_i, Arc::new(TokioBackgroundExecutor::new()));
-        let base_snapshot = Arc::new(Snapshot::try_new(url.clone(), &engine, Some(0))?);
+        let base_snapshot = Arc::new(ResolvedTable::try_new(url.clone(), &engine, Some(0))?);
         assert!(matches!(
-            Snapshot::try_new_from(base_snapshot.clone(), &engine, Some(2)),
+            ResolvedTable::try_new_from(base_snapshot.clone(), &engine, Some(2)),
             Err(Error::Generic(msg)) if msg == "LogSegment end version 1 not the same as the specified end version 2"
         ));
 
@@ -783,11 +783,11 @@ mod tests {
         store.put(&path, crc.to_string().into()).await?;
 
         // base snapshot is at version 0
-        let base_snapshot = Arc::new(Snapshot::try_new(url.clone(), &engine, Some(0))?);
+        let base_snapshot = Arc::new(ResolvedTable::try_new(url.clone(), &engine, Some(0))?);
 
         // first test: no new crc
-        let snapshot = Snapshot::try_new_from(base_snapshot.clone(), &engine, Some(1))?;
-        let expected = Snapshot::try_new(url.clone(), &engine, Some(1))?;
+        let snapshot = ResolvedTable::try_new_from(base_snapshot.clone(), &engine, Some(1))?;
+        let expected = ResolvedTable::try_new(url.clone(), &engine, Some(1))?;
         assert_eq!(snapshot, expected.into());
         assert_eq!(
             snapshot
@@ -811,8 +811,8 @@ mod tests {
             "protocol": protocol(1, 2),
         });
         store.put(&path, crc.to_string().into()).await?;
-        let snapshot = Snapshot::try_new_from(base_snapshot.clone(), &engine, Some(1))?;
-        let expected = Snapshot::try_new(url.clone(), &engine, Some(1))?;
+        let snapshot = ResolvedTable::try_new_from(base_snapshot.clone(), &engine, Some(1))?;
+        let expected = ResolvedTable::try_new(url.clone(), &engine, Some(1))?;
         assert_eq!(snapshot, expected.into());
         assert_eq!(
             snapshot
@@ -888,7 +888,7 @@ mod tests {
         .unwrap();
         let location = url::Url::from_directory_path(path).unwrap();
         let engine = SyncEngine::new();
-        let snapshot = Snapshot::try_new(location, &engine, None).unwrap();
+        let snapshot = ResolvedTable::try_new(location, &engine, None).unwrap();
 
         assert_eq!(snapshot.log_segment.checkpoint_parts.len(), 1);
         assert_eq!(
@@ -995,7 +995,7 @@ mod tests {
         .join("\n");
         add_commit(store.as_ref(), 1, commit).await.unwrap();
 
-        let snapshot = Arc::new(Snapshot::try_new(url.clone(), &engine, None)?);
+        let snapshot = Arc::new(ResolvedTable::try_new(url.clone(), &engine, None)?);
 
         assert_eq!(snapshot.get_domain_metadata("domain1", &engine)?, None);
         assert_eq!(

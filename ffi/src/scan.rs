@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::{Arc, Mutex};
 
-use delta_kernel::resolved_table::Snapshot;
+use delta_kernel::resolved_table::ResolvedTable;
 use delta_kernel::scan::state::DvInfo;
 use delta_kernel::scan::{Scan, ScanMetadata};
 use delta_kernel::{DeltaResult, Error, Expression, ExpressionRef};
@@ -103,7 +103,7 @@ pub unsafe extern "C" fn scan(
 }
 
 fn scan_impl(
-    snapshot: Arc<Snapshot>,
+    snapshot: Arc<ResolvedTable>,
     predicate: Option<&mut EnginePredicate>,
 ) -> DeltaResult<Handle<SharedScan>> {
     let mut scan_builder = snapshot.scan_builder();

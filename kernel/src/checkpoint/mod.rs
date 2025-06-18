@@ -97,7 +97,7 @@ use crate::engine_data::FilteredEngineData;
 use crate::expressions::Scalar;
 use crate::log_replay::LogReplayProcessor;
 use crate::path::ParsedLogPath;
-use crate::resolved_table::{Snapshot, LAST_CHECKPOINT_FILE_NAME};
+use crate::resolved_table::{ResolvedTable, LAST_CHECKPOINT_FILE_NAME};
 use crate::schema::{DataType, SchemaRef, StructField, StructType, ToSchema as _};
 use crate::{DeltaResult, Engine, EngineData, Error, EvaluationHandlerExtension, FileMeta};
 use log_replay::{CheckpointBatch, CheckpointLogReplayProcessor};
@@ -201,7 +201,7 @@ impl Iterator for CheckpointDataIterator {
 /// See the [module-level documentation](self) for the complete checkpoint workflow
 pub struct CheckpointWriter {
     /// Reference to the snapshot (i.e. version) of the table being checkpointed
-    pub(crate) snapshot: Arc<Snapshot>,
+    pub(crate) snapshot: Arc<ResolvedTable>,
 
     /// The version of the snapshot being checkpointed.
     /// Note: Although the version is stored as a u64 in the snapshot, it is stored as an i64
@@ -211,7 +211,7 @@ pub struct CheckpointWriter {
 
 impl CheckpointWriter {
     /// Creates a new [`CheckpointWriter`] for the given snapshot.
-    pub(crate) fn try_new(snapshot: Arc<Snapshot>) -> DeltaResult<Self> {
+    pub(crate) fn try_new(snapshot: Arc<ResolvedTable>) -> DeltaResult<Self> {
         let version = i64::try_from(snapshot.version()).map_err(|e| {
             Error::CheckpointWrite(format!(
                 "Failed to convert checkpoint version from u64 {} to i64: {}",

@@ -20,7 +20,7 @@ use crate::expressions::{ColumnName, Expression, ExpressionRef, Predicate, Predi
 use crate::kernel_predicates::{DefaultKernelPredicateEvaluator, EmptyColumnResolver};
 use crate::log_replay::{ActionsBatch, HasSelectionVector};
 use crate::log_segment::{ListedLogFiles, LogSegment};
-use crate::resolved_table::Snapshot;
+use crate::resolved_table::ResolvedTable;
 use crate::scan::state::{DvInfo, Stats};
 use crate::schema::ToSchema as _;
 use crate::schema::{
@@ -43,7 +43,7 @@ static CHECKPOINT_READ_SCHEMA: LazyLock<SchemaRef> =
 
 /// Builder to scan a snapshot of a table.
 pub struct ScanBuilder {
-    snapshot: Arc<Snapshot>,
+    snapshot: Arc<ResolvedTable>,
     schema: Option<SchemaRef>,
     predicate: Option<PredicateRef>,
 }
@@ -59,7 +59,7 @@ impl std::fmt::Debug for ScanBuilder {
 
 impl ScanBuilder {
     /// Create a new [`ScanBuilder`] instance.
-    pub fn new(snapshot: impl Into<Arc<Snapshot>>) -> Self {
+    pub fn new(snapshot: impl Into<Arc<ResolvedTable>>) -> Self {
         Self {
             snapshot: snapshot.into(),
             schema: None,
@@ -379,7 +379,7 @@ impl HasSelectionVector for ScanMetadata {
 /// The result of building a scan over a table. This can be used to get the actual data from
 /// scanning the table.
 pub struct Scan {
-    snapshot: Arc<Snapshot>,
+    snapshot: Arc<ResolvedTable>,
     logical_schema: SchemaRef,
     physical_schema: SchemaRef,
     physical_predicate: PhysicalPredicate,
@@ -408,7 +408,7 @@ impl Scan {
     }
 
     /// Get a shared reference to the [`Snapshot`] of this scan.
-    pub fn snapshot(&self) -> &Arc<Snapshot> {
+    pub fn snapshot(&self) -> &Arc<ResolvedTable> {
         &self.snapshot
     }
 

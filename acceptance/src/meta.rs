@@ -8,7 +8,7 @@ use futures::stream::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use delta_kernel::resolved_table::Snapshot;
+use delta_kernel::resolved_table::ResolvedTable;
 use delta_kernel::{Engine, Error, Table, Version};
 
 #[derive(Debug, thiserror::Error)]
@@ -79,7 +79,7 @@ impl TestCaseInfo {
     fn assert_snapshot_meta(
         &self,
         case: &TableVersionMetaData,
-        snapshot: &Snapshot,
+        snapshot: &ResolvedTable,
     ) -> TestResult<()> {
         assert_eq!(snapshot.version(), case.version);
 

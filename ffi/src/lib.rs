@@ -11,7 +11,7 @@ use std::sync::Arc;
 use tracing::debug;
 use url::Url;
 
-use delta_kernel::resolved_table::Snapshot;
+use delta_kernel::resolved_table::ResolvedTable;
 use delta_kernel::schema::Schema;
 use delta_kernel::{DeltaResult, Engine, EngineData, Table};
 use delta_kernel_ffi_macros::handle_descriptor;
@@ -553,7 +553,7 @@ pub unsafe extern "C" fn free_engine(engine: Handle<SharedExternEngine>) {
 #[handle_descriptor(target=Schema, mutable=false, sized=true)]
 pub struct SharedSchema;
 
-#[handle_descriptor(target=Snapshot, mutable=false, sized=true)]
+#[handle_descriptor(target=ResolvedTable, mutable=false, sized=true)]
 pub struct SharedSnapshot;
 
 /// Get the latest snapshot from the specified table
@@ -575,7 +575,7 @@ fn snapshot_impl(
     url: DeltaResult<Url>,
     extern_engine: &dyn ExternEngine,
 ) -> DeltaResult<Handle<SharedSnapshot>> {
-    let snapshot = Snapshot::try_new(url?, extern_engine.engine().as_ref(), None)?;
+    let snapshot = ResolvedTable::try_new(url?, extern_engine.engine().as_ref(), None)?;
     Ok(Arc::new(snapshot).into())
 }
 

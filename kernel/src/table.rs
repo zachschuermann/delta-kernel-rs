@@ -9,7 +9,7 @@ use std::sync::Arc;
 use url::Url;
 
 use crate::checkpoint::CheckpointWriter;
-use crate::resolved_table::Snapshot;
+use crate::resolved_table::ResolvedTable;
 use crate::table_changes::TableChanges;
 use crate::transaction::Transaction;
 use crate::{DeltaResult, Engine, Error, Version};
@@ -79,8 +79,12 @@ impl Table {
     /// Create a [`Snapshot`] of the table corresponding to `version`.
     ///
     /// If no version is supplied, a snapshot for the latest version will be created.
-    pub fn snapshot(&self, engine: &dyn Engine, version: Option<Version>) -> DeltaResult<Snapshot> {
-        Snapshot::try_new(self.location.clone(), engine, version)
+    pub fn snapshot(
+        &self,
+        engine: &dyn Engine,
+        version: Option<Version>,
+    ) -> DeltaResult<ResolvedTable> {
+        ResolvedTable::try_new(self.location.clone(), engine, version)
     }
 
     /// Create a [`TableChanges`] to get a change data feed for the table between `start_version`,

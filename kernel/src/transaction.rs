@@ -9,7 +9,7 @@ use crate::actions::{get_log_add_schema, get_log_commit_info_schema, get_log_txn
 use crate::error::Error;
 use crate::expressions::{column_expr, Scalar, StructData};
 use crate::path::ParsedLogPath;
-use crate::resolved_table::Snapshot;
+use crate::resolved_table::ResolvedTable;
 use crate::schema::{MapType, SchemaRef, StructField, StructType};
 use crate::{DataType, DeltaResult, Engine, EngineData, Expression, IntoEngineData, Version};
 
@@ -53,7 +53,7 @@ pub fn get_write_metadata_schema() -> &'static SchemaRef {
 /// txn.commit(&engine)?;
 /// ```
 pub struct Transaction {
-    read_snapshot: Arc<Snapshot>,
+    read_snapshot: Arc<ResolvedTable>,
     operation: Option<String>,
     commit_info: Option<Arc<dyn EngineData>>,
     write_metadata: Vec<Box<dyn EngineData>>,
@@ -85,7 +85,7 @@ impl Transaction {
     /// Instead of using this API, the more typical (user-facing) API is
     /// [Table::new_transaction](crate::table::Table::new_transaction) to create a transaction from
     /// a table automatically backed by the latest snapshot.
-    pub(crate) fn try_new(snapshot: impl Into<Arc<Snapshot>>) -> DeltaResult<Self> {
+    pub(crate) fn try_new(snapshot: impl Into<Arc<ResolvedTable>>) -> DeltaResult<Self> {
         let read_snapshot = snapshot.into();
 
         // important! before a read/write to the table we must check it is supported
