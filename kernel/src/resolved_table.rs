@@ -10,7 +10,7 @@ use crate::checkpoint::CheckpointWriter;
 use crate::log_segment::{self, ListedLogFiles, LogSegment};
 use crate::scan::ScanBuilder;
 use crate::schema::{Schema, SchemaRef};
-use crate::table_configuration::TableConfiguration;
+use crate::table_configuration::ResolvedMetadata;
 use crate::table_features::ColumnMappingMode;
 use crate::table_properties::TableProperties;
 use crate::{DeltaResult, Engine, Error, StorageHandler, Version};
@@ -33,7 +33,7 @@ pub(crate) const LAST_CHECKPOINT_FILE_NAME: &str = "_last_checkpoint";
 #[derive(PartialEq, Eq)]
 pub struct ResolvedTable {
     log_segment: LogSegment,
-    table_configuration: TableConfiguration,
+    resolved_metadata: ResolvedMetadata,
 }
 
 impl Drop for ResolvedTable {
@@ -82,10 +82,10 @@ pub trait Versioned {
 //
 
 impl ResolvedTable {
-    fn new(log_segment: LogSegment, table_configuration: TableConfiguration) -> Self {
+    fn new(log_segment: LogSegment, table_configuration: ResolvedMetadata) -> Self {
         Self {
             log_segment,
-            table_configuration,
+            resolved_metadata: table_configuration,
         }
     }
 
@@ -242,7 +242,7 @@ impl ResolvedTable {
         // we have new commits and no new checkpoint: we replay new commits for P+M and then
         // create a new snapshot by combining LogSegments and building a new TableConfiguration
         let (new_metadata, new_protocol) = new_log_segment.protocol_and_metadata(engine)?;
-        let table_configuration = TableConfiguration::try_new_from(
+        let table_configuration = ResolvedMetadata::try_new_from(
             existing_snapshot.table_configuration(),
             new_metadata,
             new_protocol,
@@ -290,10 +290,10 @@ impl ResolvedTable {
     ) -> DeltaResult<Self> {
         let (metadata, protocol) = log_segment.read_metadata(engine)?;
         let table_configuration =
-            TableConfiguration::try_new(metadata, protocol, location, log_segment.end_version)?;
+            ResolvedMetadata::try_new(metadata, protocol, location, log_segment.end_version)?;
         Ok(Self {
             log_segment,
-            table_configuration,
+            resolved_metadata: table_configuration,
         })
     }
 
@@ -312,7 +312,7 @@ impl ResolvedTable {
     }
 
     pub fn table_root(&self) -> &Url {
-        self.table_configuration.table_root()
+        self.resolved_metadata.table_root()
     }
 
     /// Version of this `Snapshot` in the table.
@@ -322,20 +322,20 @@ impl ResolvedTable {
 
     /// Table [`type@Schema`] at this `Snapshot`s version.
     pub fn schema(&self) -> SchemaRef {
-        self.table_configuration.schema()
+        self.resolved_metadata.schema()
     }
 
     /// Table [`Metadata`] at this `Snapshot`s version.
     #[internal_api]
     pub(crate) fn metadata(&self) -> &Metadata {
-        self.table_configuration.metadata()
+        self.resolved_metadata.metadata()
     }
 
     /// Table [`Protocol`] at this `Snapshot`s version.
     #[allow(dead_code)]
     #[internal_api]
     pub(crate) fn protocol(&self) -> &Protocol {
-        self.table_configuration.protocol()
+        self.resolved_metadata.protocol()
     }
 
     /// Get the [`TableProperties`] for this [`Snapshot`].
@@ -345,15 +345,15 @@ impl ResolvedTable {
 
     /// Get the [`TableConfiguration`] for this [`Snapshot`].
     #[internal_api]
-    pub(crate) fn table_configuration(&self) -> &TableConfiguration {
-        &self.table_configuration
+    pub(crate) fn table_configuration(&self) -> &ResolvedMetadata {
+        &self.resolved_metadata
     }
 
     /// Get the [column mapping
     /// mode](https://github.com/delta-io/delta/blob/master/PROTOCOL.md#column-mapping) at this
     /// `Snapshot`s version.
     pub fn column_mapping_mode(&self) -> ColumnMappingMode {
-        self.table_configuration.column_mapping_mode()
+        self.resolved_metadata.column_mapping_mode()
     }
 
     /// Create a [`ScanBuilder`] for an `Arc<Snapshot>`.

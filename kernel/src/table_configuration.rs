@@ -34,7 +34,7 @@ use delta_kernel_derive::internal_api;
 /// table is supported.
 #[internal_api]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct TableConfiguration {
+pub(crate) struct ResolvedMetadata {
     metadata: Metadata,
     protocol: Protocol,
     schema: SchemaRef,
@@ -44,7 +44,7 @@ pub(crate) struct TableConfiguration {
     version: Version,
 }
 
-impl TableConfiguration {
+impl ResolvedMetadata {
     /// Constructs a [`TableConfiguration`] for a table located in `table_root` at `version`.
     /// This validates that the [`Metadata`] and [`Protocol`] are compatible with one another
     /// and that the kernel supports reading from this table.
@@ -351,7 +351,7 @@ mod test {
     use crate::table_properties::TableProperties;
     use crate::Error;
 
-    use super::TableConfiguration;
+    use super::ResolvedMetadata;
 
     #[test]
     fn dv_supported_not_enabled() {
@@ -371,7 +371,7 @@ mod test {
         )
         .unwrap();
         let table_root = Url::try_from("file:///").unwrap();
-        let table_config = TableConfiguration::try_new(metadata, protocol, table_root, 0).unwrap();
+        let table_config = ResolvedMetadata::try_new(metadata, protocol, table_root, 0).unwrap();
         assert!(table_config.is_deletion_vector_supported());
         assert!(!table_config.is_deletion_vector_enabled());
     }
@@ -397,7 +397,7 @@ mod test {
         )
         .unwrap();
         let table_root = Url::try_from("file:///").unwrap();
-        let table_config = TableConfiguration::try_new(metadata, protocol, table_root, 0).unwrap();
+        let table_config = ResolvedMetadata::try_new(metadata, protocol, table_root, 0).unwrap();
         assert!(table_config.is_deletion_vector_supported());
         assert!(table_config.is_deletion_vector_enabled());
     }
@@ -421,7 +421,7 @@ mod test {
         )
         .unwrap();
         let table_root = Url::try_from("file:///").unwrap();
-        let table_config = TableConfiguration::try_new(metadata, protocol, table_root, 0).unwrap();
+        let table_config = ResolvedMetadata::try_new(metadata, protocol, table_root, 0).unwrap();
         assert!(table_config.is_in_commit_timestamps_supported());
         assert!(table_config.is_in_commit_timestamps_enabled());
         let enablement = table_config.in_commit_timestamp_enablement().unwrap();
@@ -445,7 +445,7 @@ mod test {
         )
         .unwrap();
         let table_root = Url::try_from("file:///").unwrap();
-        let table_config = TableConfiguration::try_new(metadata, protocol, table_root, 0).unwrap();
+        let table_config = ResolvedMetadata::try_new(metadata, protocol, table_root, 0).unwrap();
         assert!(table_config.is_in_commit_timestamps_supported());
         assert!(table_config.is_in_commit_timestamps_enabled());
         assert!(matches!(
@@ -466,7 +466,7 @@ mod test {
         )
         .unwrap();
         let table_root = Url::try_from("file:///").unwrap();
-        let table_config = TableConfiguration::try_new(metadata, protocol, table_root, 0).unwrap();
+        let table_config = ResolvedMetadata::try_new(metadata, protocol, table_root, 0).unwrap();
         assert!(table_config.is_in_commit_timestamps_supported());
         assert!(!table_config.is_in_commit_timestamps_enabled());
     }
@@ -478,7 +478,7 @@ mod test {
         };
         let protocol = Protocol::try_new(3, 7, Some(["unknown"]), Some(["unknown"])).unwrap();
         let table_root = Url::try_from("file:///").unwrap();
-        TableConfiguration::try_new(metadata, protocol, table_root, 0)
+        ResolvedMetadata::try_new(metadata, protocol, table_root, 0)
             .expect_err("Unknown feature is not supported in kernel");
     }
     #[test]
@@ -499,7 +499,7 @@ mod test {
         )
         .unwrap();
         let table_root = Url::try_from("file:///").unwrap();
-        let table_config = TableConfiguration::try_new(metadata, protocol, table_root, 0).unwrap();
+        let table_config = ResolvedMetadata::try_new(metadata, protocol, table_root, 0).unwrap();
         assert!(!table_config.is_deletion_vector_supported());
         assert!(!table_config.is_deletion_vector_enabled());
     }
@@ -523,7 +523,7 @@ mod test {
         )
         .unwrap();
         let table_root = Url::try_from("file:///").unwrap();
-        let table_config = TableConfiguration::try_new(metadata, protocol, table_root, 0).unwrap();
+        let table_config = ResolvedMetadata::try_new(metadata, protocol, table_root, 0).unwrap();
 
         let new_metadata = Metadata {
             configuration: HashMap::from_iter([
@@ -551,7 +551,7 @@ mod test {
         )
         .unwrap();
         let new_version = 1;
-        let new_table_config = TableConfiguration::try_new_from(
+        let new_table_config = ResolvedMetadata::try_new_from(
             &table_config,
             Some(new_metadata.clone()),
             Some(new_protocol.clone()),
@@ -605,7 +605,7 @@ mod test {
 
         let table_root = Url::try_from("file:///").unwrap();
 
-        let result = TableConfiguration::try_new(
+        let result = ResolvedMetadata::try_new(
             metadata.clone(),
             protocol_without_timestamp_ntz_features,
             table_root.clone(),
@@ -617,7 +617,7 @@ mod test {
         );
         assert!(result.unwrap_err().to_string().contains("timestampNtz"));
 
-        let result = TableConfiguration::try_new(
+        let result = ResolvedMetadata::try_new(
             metadata,
             protocol_with_timestamp_ntz_features,
             table_root,
