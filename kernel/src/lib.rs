@@ -104,6 +104,8 @@ pub mod path;
 #[cfg(not(feature = "internal-api"))]
 pub(crate) mod path;
 
+pub use path::LogFile;
+
 #[cfg(feature = "internal-api")]
 pub mod log_replay;
 #[cfg(not(feature = "internal-api"))]

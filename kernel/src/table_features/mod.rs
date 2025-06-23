@@ -34,8 +34,7 @@ mod timestamp_ntz;
 )]
 #[strum(serialize_all = "camelCase")]
 #[serde(rename_all = "camelCase")]
-#[internal_api]
-pub(crate) enum ReaderFeature {
+pub enum ReaderFeature {
     /// Mapping of one column to another
     ColumnMapping,
     /// Deletion vectors for merge, update, delete
@@ -81,8 +80,7 @@ pub(crate) enum ReaderFeature {
 )]
 #[strum(serialize_all = "camelCase")]
 #[serde(rename_all = "camelCase")]
-#[internal_api]
-pub(crate) enum WriterFeature {
+pub enum WriterFeature {
     /// Append Only Tables
     AppendOnly,
     /// Table invariants

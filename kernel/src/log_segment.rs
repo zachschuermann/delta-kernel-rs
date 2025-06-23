@@ -10,7 +10,7 @@ use crate::actions::{
     SIDECAR_NAME,
 };
 use crate::log_replay::ActionsBatch;
-use crate::path::{LogPathFileType, ParsedLogPath};
+use crate::path::{LogFile, LogPathFileType, ParsedLogPath};
 use crate::resolved_table::LastCheckpointHint;
 use crate::schema::SchemaRef;
 use crate::utils::require;
@@ -142,17 +142,35 @@ impl LogSegment {
     pub(crate) fn for_snapshot(
         storage: &dyn StorageHandler,
         log_root: Url,
+        log_tail: Vec<LogFile>,
         checkpoint_hint: impl Into<Option<LastCheckpointHint>>,
         time_travel_version: impl Into<Option<Version>>,
     ) -> DeltaResult<Self> {
         let time_travel_version = time_travel_version.into();
 
+        // FIXME: we want something like a LogLister? encapsulate (Url + log tail) and all the ways
+        // we can do a list
+
         let listed_files = match (checkpoint_hint.into(), time_travel_version) {
-            (Some(cp), None) => list_log_files_with_checkpoint(&cp, storage, &log_root, None)?,
-            (Some(cp), Some(end_version)) if cp.version <= end_version => {
-                list_log_files_with_checkpoint(&cp, storage, &log_root, Some(end_version))?
+            (Some(cp), None) => {
+                list_log_files_with_checkpoint(&cp, storage, &log_root, log_tail, None)?
             }
-            _ => list_log_files_with_version(storage, &log_root, None, time_travel_version)?,
+            (Some(cp), Some(end_version)) if cp.version <= end_version => {
+                list_log_files_with_checkpoint(
+                    &cp,
+                    storage,
+                    &log_root,
+                    log_tail,
+                    Some(end_version),
+                )?
+            }
+            _ => list_log_files_with_version(
+                storage,
+                &log_root,
+                log_tail,
+                None,
+                time_travel_version,
+            )?,
         };
 
         LogSegment::try_new(listed_files, log_root, time_travel_version)
@@ -572,13 +590,36 @@ impl ListedLogFiles {
 pub(crate) fn list_log_files_with_version(
     storage: &dyn StorageHandler,
     log_root: &Url,
+    log_tail: Vec<LogFile>,
     start_version: Option<Version>,
     end_version: Option<Version>,
 ) -> DeltaResult<ListedLogFiles> {
     // We expect 10 commit files per checkpoint, so start with that size. We could adjust this based
     // on config at some point
 
-    let log_files = list_log_files(storage, log_root, start_version, end_version)?;
+    // TODO: move this log tail stuff elsewhere
+    //
+    // should we validate log_tail is contiguous and end_version <= log_tail end?
+    // also need to carefully define semantics of the Vec! (ordering)
+
+    // ultimately we want [start_version, end_version] log files. since log_tail must be
+    // contiguous tail of the log, we have one of 3 cases:
+    // 1. log_tail is empty, so we list [start_version, end_version]
+    // 2. log_tail covers part of the range, so we list [start_version, log_tail_start) and concat
+    //    [log_tail_start, end_version]
+    // 3. log_tail covers the entire range, so we just return log_tail
+    let mut log_tail = log_tail.into_iter().map(|file| file.parse()).peekable();
+    let tail_start_version = log_tail
+        .peek()
+        .map(|file| file.as_ref().ok().map(|f| f.version))
+        .flatten();
+    // TODO: remove box
+    let log_files: Box<dyn Iterator<Item = _>> =
+        if tail_start_version.is_some_and(|v| v >= start_version.unwrap_or(0)) {
+            Box::new(log_tail)
+        } else {
+            Box::new(list_log_files(storage, log_root, start_version, end_version)?.chain(log_tail))
+        };
 
     log_files.process_results(|iter| {
         let mut ascending_commit_files = Vec::with_capacity(10);
@@ -692,11 +733,13 @@ fn list_log_files_with_checkpoint(
     checkpoint_metadata: &LastCheckpointHint,
     storage: &dyn StorageHandler,
     log_root: &Url,
+    log_tail: Vec<LogFile>,
     end_version: Option<Version>,
 ) -> DeltaResult<ListedLogFiles> {
     let listed_files = list_log_files_with_version(
         storage,
         log_root,
+        log_tail,
         Some(checkpoint_metadata.version),
         end_version,
     )?;

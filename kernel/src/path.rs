@@ -2,7 +2,7 @@
 
 use std::str::FromStr;
 
-use crate::{DeltaResult, Error, FileMeta, Version};
+use crate::{DeltaResult, EngineData, Error, FileMeta, Version};
 use delta_kernel_derive::internal_api;
 
 use url::Url;
@@ -17,9 +17,43 @@ const MULTIPART_PART_LEN: usize = 10;
 /// The number of characters in the uuid part of a uuid checkpoint
 const UUID_PART_LEN: usize = 36;
 
+// TODO: If we don't want to expose all of ParsedLogPath we can keep it private and have a smaller
+// shim with a 'parse' API
+//
+// pub struct LogFile {
+//     data: LogFileData,
+//     file_type: LogPathFileType,
+//     version: Version,
+// }
+
+// impl LogFile {
+//     fn parse(self) -> DeltaResult<ParsedLogPath> {
+//         ParsedLogPath::try_from_log_file(self)
+//     }
+// }
+
+// pub enum LogFile<L> {
+//     Data(Box<dyn EngineData>),
+//     Path(L),
+// }
+
+pub enum LogFile {
+    Data(Box<dyn EngineData>),
+    Path(FileMeta),
+}
+
+impl LogFile {
+    pub(crate) fn parse(self) -> DeltaResult<ParsedLogPath<FileMeta>> {
+        match self {
+            LogFile::Data(_) => Err(Error::unsupported("TODO: LogFile::parse engine data")),
+            LogFile::Path(path) => Ok(ParsedLogPath::try_from(path)
+                .and_then(|opt| opt.ok_or_else(|| Error::generic("fixme")))?),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[internal_api]
-pub(crate) enum LogPathFileType {
+pub enum LogPathFileType {
     Commit,
     SinglePartCheckpoint,
     #[allow(unused)]
@@ -175,6 +209,10 @@ impl<Location: AsUrl> ParsedLogPath<Location> {
     pub(crate) fn is_unknown(&self) -> bool {
         matches!(self.file_type, LogPathFileType::Unknown)
     }
+
+    // fn try_from_log_file(log_file: LogFile) -> DeltaResult<Self> {
+    //     Self::try_from(self.location.clone())
+    // }
 }
 
 impl ParsedLogPath<Url> {

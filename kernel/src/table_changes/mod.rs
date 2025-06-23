@@ -147,16 +147,19 @@ impl TableChanges {
             end_version,
         )?;
 
+        // FIXME: we will need to support this being built from a ResolvedTable/ResolvedMetadata
+
         // Both snapshots ensure that reading is supported at the start and end version using
         // `ensure_read_supported`. Note that we must still verify that reading is
         // supported for every protocol action in the CDF range.
-        let start_snapshot = Arc::new(ResolvedTable::try_new(
-            table_root.as_url().clone(),
-            engine,
-            Some(start_version),
-        )?);
-        let end_snapshot =
-            ResolvedTable::try_new_from(start_snapshot.clone(), engine, end_version)?;
+        let start_snapshot = todo!();
+        // Arc::new(ResolvedTable::try_new(
+        //     table_root.as_url().clone(),
+        //     engine,
+        //     Some(start_version),
+        // )?);
+        let end_snapshot: Arc<_> = todo!();
+        // ResolvedTable::try_new_from(start_snapshot.clone(), engine, end_version)?;
 
         // Verify CDF is enabled at the beginning and end of the interval using
         // [`check_cdf_table_properties`] to fail early. This also ensures that column mapping is

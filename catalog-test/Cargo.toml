@@ -12,3 +12,4 @@ version.workspace = true
 [dev-dependencies]
 delta_kernel = { path = "../kernel", features = ["default-engine", "arrow"] }
 uc-catalog = { path = "../uc-catalog" }
+uc-client = { path = "../uc-client" }

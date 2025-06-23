@@ -8,11 +8,13 @@ use crate::actions::set_transaction::SetTransactionScanner;
 use crate::actions::{Metadata, Protocol, INTERNAL_DOMAIN_PREFIX};
 use crate::checkpoint::CheckpointWriter;
 use crate::log_segment::{self, ListedLogFiles, LogSegment};
+use crate::path::LogFile;
 use crate::scan::ScanBuilder;
 use crate::schema::{Schema, SchemaRef};
 use crate::table_configuration::ResolvedMetadata;
 use crate::table_features::ColumnMappingMode;
 use crate::table_properties::TableProperties;
+use crate::EngineData;
 use crate::{DeltaResult, Engine, Error, StorageHandler, Version};
 use delta_kernel_derive::internal_api;
 
@@ -25,15 +27,169 @@ use url::Url;
 /// the latest checkpoint without a full directory listing.
 pub(crate) const LAST_CHECKPOINT_FILE_NAME: &str = "_last_checkpoint";
 
-// TODO expose methods for accessing the files of a table (with file pruning).
-/// In-memory representation of a specific snapshot of a Delta table. While a `DeltaTable` exists
-/// throughout time, `Snapshot`s represent a view of a table at a specific point in time; they
-/// have a defined schema (which may change over time for any given table), specific version, and
-/// frozen log segment.
+// #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+// pub enum LogFile {
+//     Commit(Version),
+//     SinglePartCheckpoint(Version),
+//     UuidCheckpoint {
+//         version: Version,
+//         uuid: String,
+//     },
+//     MultiPartCheckpoint {
+//         version: Version,
+//         part_num: u32,
+//         num_parts: u32,
+//     },
+//     CompactedCommit {
+//         low: Version,
+//         hi: Version,
+//     },
+//     Crc(Version),
+// }
+
+/// Table that isn't 'resolved' -> no known protocol/metadata/version. Version here just specifies
+/// a target time-travel version.
+///
+/// Calling `resolve` on this table will read table metadata from object store and return a
+/// `ResolvedTable`
+//
+// What about a catalog that caches _last_checkpoint metadata? Won't do!
+pub struct UnresolvedTable {
+    table_root: Url,
+    log_tail: Vec<LogFile>,
+    // either: None (latest) or Some(time_travel_version)
+    version: Option<Version>,
+}
+
+impl UnresolvedTable {
+    pub fn latest(table_root: Url, log_tail: Vec<LogFile>) -> Self {
+        Self {
+            table_root,
+            log_tail,
+            version: None,
+        }
+    }
+
+    pub fn at(table_root: Url, log_tail: Vec<LogFile>, version: Version) -> Self {
+        Self {
+            table_root,
+            log_tail,
+            version: Some(version),
+        }
+    }
+
+    // has to go do (maybe) LIST (not needed if log_tail has PM at version needed), then PM replay
+    pub fn resolve(self, engine: &dyn Engine) -> DeltaResult<ResolvedTable> {
+        let UnresolvedTable {
+            table_root,
+            log_tail,
+            version,
+        } = self;
+
+        let storage = engine.storage_handler();
+        let log_root = table_root.join("_delta_log/")?;
+
+        let checkpoint_hint = read_last_checkpoint(storage.as_ref(), &log_root)?;
+
+        let log_segment = LogSegment::for_snapshot(
+            storage.as_ref(),
+            log_root.clone(),
+            log_tail,
+            checkpoint_hint,
+            version,
+        )?;
+
+        let (metadata, protocol) = log_segment.read_metadata(engine)?;
+        let resolved_metadata =
+            ResolvedMetadata::try_new(metadata, protocol, table_root, log_segment.end_version)?;
+
+        Ok(ResolvedTable::new(resolved_metadata, log_segment))
+    }
+}
+
+// /// basically an UnresolvedTable + known Metadata/Protocol/Version
+// pub struct UnresolvedMetadata {
+//     table_root: Url,
+//     log_tail: Vec<LogFile>,
+//     protocol: Protocol,
+//     metadata: Metadata,
+//     version: Version,
+// }
+//
+// impl UnresolvedMetadata {
+//     pub fn new(
+//         table_root: Url,
+//         log_tail: Vec<LogFile>,
+//         protocol: Protocol,
+//         metadata: Metadata,
+//         version: Version,
+//     ) -> Self {
+//         Self {
+//             table_root,
+//             log_tail,
+//             protocol,
+//             metadata,
+//             version,
+//         }
+//     }
+// }
+
+// // TODO: need to make 'resolve' non-overridable
+// pub trait IntoUnresolvedTable {
+//     fn into_unresolved_table(self) -> UnresolvedTable;
+//
+//     // resolve has to do PM replay then go make a ResolvedTable
+//     fn resolve(self, version: Option<Version>, engine: &dyn Engine) -> DeltaResult<ResolvedTable>
+//     where
+//         Self: Sized,
+//     {
+//         let UnresolvedTable {
+//             table_root,
+//             log_tail,
+//         } = self.into_unresolved_table();
+//
+//         let storage = engine.storage_handler();
+//         let log_root = table_root.join("_delta_log/")?;
+//
+//         let checkpoint_hint = read_last_checkpoint(storage.as_ref(), &log_root)?;
+//
+//         let log_segment =
+//             LogSegment::for_snapshot(storage.as_ref(), log_root.clone(), checkpoint_hint, version)?;
+//
+//         let (metadata, protocol) = log_segment.read_metadata(engine)?;
+//         let resolved_metadata =
+//             ResolvedMetadata::try_new(metadata, protocol, table_root, log_segment.end_version)?;
+//
+//         Ok(ResolvedTable::new(resolved_metadata, log_segment))
+//     }
+// }
+//
+// pub trait IntoUnresolvedMetadata {
+//     fn into_unresolved_metadata(self) -> UnresolvedMetadata;
+//
+//     fn resolve(self) -> DeltaResult<ResolvedTable>
+//     where
+//         Self: Sized,
+//     {
+//         let metadata = self.into_unresolved_metadata();
+//         let rm = ResolvedMetadata::try_new(
+//             metadata.metadata,
+//             metadata.protocol,
+//             metadata.table_root,
+//             metadata.version,
+//         )?;
+//         todo!()
+//     }
+// }
+
+/// This represents a table at a specific version.
+//
+// for now it has a (complete) log segment -> a log segment with all table data (checkpoint-rooted
+// or 0-rooted log segment).
 #[derive(PartialEq, Eq)]
 pub struct ResolvedTable {
-    log_segment: LogSegment,
     resolved_metadata: ResolvedMetadata,
+    log_segment: LogSegment,
 }
 
 impl Drop for ResolvedTable {
@@ -45,20 +201,11 @@ impl Drop for ResolvedTable {
 impl std::fmt::Debug for ResolvedTable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Snapshot")
-            .field("path", &self.log_segment.log_root.as_str())
+            .field("path", &self.resolved_metadata.table_root().as_str())
             .field("version", &self.version())
             .field("metadata", &self.metadata())
             .finish()
     }
-}
-
-// every table must have this
-pub trait UnresolvedTable {
-    // table_root: Url
-}
-
-pub trait Versioned {
-    fn version(&self) -> Version;
 }
 
 // use crate::actions::{Metadata, Protocol};
@@ -82,10 +229,17 @@ pub trait Versioned {
 //
 
 impl ResolvedTable {
-    fn new(log_segment: LogSegment, table_configuration: ResolvedMetadata) -> Self {
+    // fn new(resolved_metadata: ResolvedMetadata, log_tail: Vec<LogFile>) -> Self {
+    //     Self {
+    //         resolved_metadata,
+    //         log_tail,
+    //     }
+    // }
+
+    fn new(resolved_metadata: ResolvedMetadata, log_segment: LogSegment) -> Self {
         Self {
+            resolved_metadata,
             log_segment,
-            resolved_metadata: table_configuration,
         }
     }
 
@@ -99,188 +253,237 @@ impl ResolvedTable {
     ///   version of the table.
     pub fn try_new(
         table_root: Url,
+        log_tail: Vec<LogFile>,
         engine: &dyn Engine,
         version: Option<Version>,
     ) -> DeltaResult<Self> {
+        // let storage = engine.storage_handler();
+        // let log_root = table_root.join("_delta_log/")?;
+        //
+        // let checkpoint_hint = read_last_checkpoint(storage.as_ref(), &log_root)?;
+        //
+        // let log_segment =
+        //     LogSegment::for_snapshot(storage.as_ref(), log_root, checkpoint_hint, version)?;
+        //
+        // // try_new_from_log_segment will ensure the protocol is supported
+        // Self::try_new_from_log_segment(table_root, log_segment, engine)
+
         let storage = engine.storage_handler();
         let log_root = table_root.join("_delta_log/")?;
 
         let checkpoint_hint = read_last_checkpoint(storage.as_ref(), &log_root)?;
 
-        let log_segment =
-            LogSegment::for_snapshot(storage.as_ref(), log_root, checkpoint_hint, version)?;
-
-        // try_new_from_log_segment will ensure the protocol is supported
-        Self::try_new_from_log_segment(table_root, log_segment, engine)
-    }
-
-    // pub fn try_new_from(resolved_metadata: impl ResolvedMetadata) {
-    //     Self
-    // }
-
-    /// Create a new [`Snapshot`] instance from an existing [`Snapshot`]. This is useful when you
-    /// already have a [`Snapshot`] lying around and want to do the minimal work to 'update' the
-    /// snapshot to a later version.
-    ///
-    /// We implement a simple heuristic:
-    /// 1. if the new version == existing version, just return the existing snapshot
-    /// 2. if the new version < existing version, error: there is no optimization to do here
-    /// 3. list from (existing checkpoint version + 1) onward (or just existing snapshot version if
-    ///    no checkpoint)
-    /// 4. a. if new checkpoint is found: just create a new snapshot from that checkpoint (and
-    ///    commits after it)
-    ///    b. if no new checkpoint is found: do lightweight P+M replay on the latest commits (after
-    ///    ensuring we only retain commits > any checkpoints)
-    ///
-    /// # Parameters
-    ///
-    /// - `existing_snapshot`: reference to an existing [`Snapshot`]
-    /// - `engine`: Implementation of [`Engine`] apis.
-    /// - `version`: target version of the [`Snapshot`]. None will create a snapshot at the latest
-    ///   version of the table.
-    pub fn try_new_from(
-        existing_snapshot: Arc<ResolvedTable>,
-        engine: &dyn Engine,
-        version: impl Into<Option<Version>>,
-    ) -> DeltaResult<Arc<Self>> {
-        let old_log_segment = &existing_snapshot.log_segment;
-        let old_version = existing_snapshot.version();
-        let new_version = version.into();
-        if let Some(new_version) = new_version {
-            if new_version == old_version {
-                // Re-requesting the same version
-                return Ok(existing_snapshot.clone());
-            }
-            if new_version < old_version {
-                // Hint is too new: error since this is effectively an incorrect optimization
-                return Err(Error::Generic(format!(
-                    "Requested snapshot version {} is older than snapshot hint version {}",
-                    new_version, old_version
-                )));
-            }
-        }
-
-        let log_root = old_log_segment.log_root.clone();
-        let storage = engine.storage_handler();
-
-        // Start listing just after the previous segment's checkpoint, if any
-        let listing_start = old_log_segment.checkpoint_version.unwrap_or(0) + 1;
-
-        // Check for new commits (and CRC)
-        let new_listed_files = log_segment::list_log_files_with_version(
+        let log_segment = LogSegment::for_snapshot(
             storage.as_ref(),
-            &log_root,
-            Some(listing_start),
-            new_version,
+            log_root.clone(),
+            log_tail,
+            checkpoint_hint,
+            version,
         )?;
 
-        // NB: we need to check both checkpoints and commits since we filter commits at and below
-        // the checkpoint version. Example: if we have a checkpoint + commit at version 1, the log
-        // listing above will only return the checkpoint and not the commit.
-        if new_listed_files.ascending_commit_files.is_empty()
-            && new_listed_files.checkpoint_parts.is_empty()
-        {
-            match new_version {
-                Some(new_version) if new_version != old_version => {
-                    // No new commits, but we are looking for a new version
-                    return Err(Error::Generic(format!(
-                        "Requested snapshot version {} is newer than the latest version {}",
-                        new_version, old_version
-                    )));
-                }
-                _ => {
-                    // No new commits, just return the same snapshot
-                    return Ok(existing_snapshot.clone());
-                }
-            }
-        }
+        let (metadata, protocol) = log_segment.read_metadata(engine)?;
+        let resolved_metadata =
+            ResolvedMetadata::try_new(metadata, protocol, table_root, log_segment.end_version)?;
 
-        // create a log segment just from existing_checkpoint.version -> new_version
-        // OR could be from 1 -> new_version
-        let mut new_log_segment =
-            LogSegment::try_new(new_listed_files, log_root.clone(), new_version)?;
-
-        let new_end_version = new_log_segment.end_version;
-        if new_end_version < old_version {
-            // we should never see a new log segment with a version < the existing snapshot
-            // version, that would mean a commit was incorrectly deleted from the log
-            return Err(Error::Generic(format!(
-                "Unexpected state: The newest version in the log {} is older than the old version {}",
-                new_end_version, old_version)));
-        }
-        if new_end_version == old_version {
-            // No new commits, just return the same snapshot
-            return Ok(existing_snapshot.clone());
-        }
-
-        if new_log_segment.checkpoint_version.is_some() {
-            // we have a checkpoint in the new LogSegment, just construct a new snapshot from that
-            let snapshot = Self::try_new_from_log_segment(
-                existing_snapshot.table_root().clone(),
-                new_log_segment,
-                engine,
-            );
-            return Ok(Arc::new(snapshot?));
-        }
-
-        // after this point, we incrementally update the snapshot with the new log segment.
-        // first we remove the 'overlap' in commits, example:
-        //
-        //    old logsegment checkpoint1-commit1-commit2-commit3
-        // 1. new logsegment             commit1-commit2-commit3
-        // 2. new logsegment             commit1-commit2-commit3-commit4
-        // 3. new logsegment                     checkpoint2+commit2-commit3-commit4
-        //
-        // retain does
-        // 1. new logsegment             [empty] -> caught above
-        // 2. new logsegment             [commit4]
-        // 3. new logsegment             [checkpoint2-commit3] -> caught above
-        new_log_segment
-            .ascending_commit_files
-            .retain(|log_path| old_version < log_path.version);
-
-        // we have new commits and no new checkpoint: we replay new commits for P+M and then
-        // create a new snapshot by combining LogSegments and building a new TableConfiguration
-        let (new_metadata, new_protocol) = new_log_segment.protocol_and_metadata(engine)?;
-        let table_configuration = ResolvedMetadata::try_new_from(
-            existing_snapshot.table_configuration(),
-            new_metadata,
-            new_protocol,
-            new_log_segment.end_version,
-        )?;
-
-        // NB: we must add the new log segment to the existing snapshot's log segment
-        let mut ascending_commit_files = old_log_segment.ascending_commit_files.clone();
-        ascending_commit_files.extend(new_log_segment.ascending_commit_files);
-        let mut ascending_compaction_files = old_log_segment.ascending_compaction_files.clone();
-        ascending_compaction_files.extend(new_log_segment.ascending_compaction_files);
-
-        // Note that we _could_ go backwards if someone deletes a CRC:
-        // old listing: 1, 2, 2.crc, 3, 3.crc (latest is 3.crc)
-        // new listing: 1, 2, 2.crc, 3        (latest is 2.crc)
-        // and we would still pick the new listing's (older) CRC file since it ostensibly still
-        // exists
-        let latest_crc_file = new_log_segment
-            .latest_crc_file
-            .or_else(|| old_log_segment.latest_crc_file.clone());
-
-        // we can pass in just the old checkpoint parts since by the time we reach this line, we
-        // know there are no checkpoints in the new log segment.
-        let combined_log_segment = LogSegment::try_new(
-            ListedLogFiles {
-                ascending_commit_files,
-                ascending_compaction_files,
-                checkpoint_parts: old_log_segment.checkpoint_parts.clone(),
-                latest_crc_file,
-            },
-            log_root,
-            new_version,
-        )?;
-        Ok(Arc::new(ResolvedTable::new(
-            combined_log_segment,
-            table_configuration,
-        )))
+        Ok(ResolvedTable::new(resolved_metadata, log_segment))
     }
+
+    // TODO: should we bundle the data needed here into pieces like:
+    // 1. UnresolvedTable (table_root, log_tail, optional_version)
+    // 2. UnresolvedMetadata (Protocol/Metadata/Version)
+    pub fn try_new_from_metadata(
+        table_root: Url,
+        log_tail: Vec<LogFile>,
+        protocol: Protocol,
+        metadata: Metadata,
+        version: Version,
+        engine: &dyn Engine,
+    ) -> DeltaResult<Self> {
+        let storage = engine.storage_handler();
+        let log_root = table_root.join("_delta_log/")?;
+
+        let resolved_metadata = ResolvedMetadata::try_new(metadata, protocol, table_root, version)?;
+
+        // TODO: need to push down checkpoint_hint into LogSegment creation
+        let checkpoint_hint = read_last_checkpoint(storage.as_ref(), &log_root)?;
+
+        let log_segment = LogSegment::for_snapshot(
+            engine.storage_handler().as_ref(),
+            log_root,
+            log_tail,
+            checkpoint_hint,
+            version,
+        )?;
+
+        Ok(Self::new(resolved_metadata, log_segment))
+    }
+
+    // /// Create a new [`Snapshot`] instance from an existing [`Snapshot`]. This is useful when you
+    // /// already have a [`Snapshot`] lying around and want to do the minimal work to 'update' the
+    // /// snapshot to a later version.
+    // ///
+    // /// We implement a simple heuristic:
+    // /// 1. if the new version == existing version, just return the existing snapshot
+    // /// 2. if the new version < existing version, error: there is no optimization to do here
+    // /// 3. list from (existing checkpoint version + 1) onward (or just existing snapshot version if
+    // ///    no checkpoint)
+    // /// 4. a. if new checkpoint is found: just create a new snapshot from that checkpoint (and
+    // ///    commits after it)
+    // ///    b. if no new checkpoint is found: do lightweight P+M replay on the latest commits (after
+    // ///    ensuring we only retain commits > any checkpoints)
+    // ///
+    // /// # Parameters
+    // ///
+    // /// - `existing_snapshot`: reference to an existing [`Snapshot`]
+    // /// - `engine`: Implementation of [`Engine`] apis.
+    // /// - `version`: target version of the [`Snapshot`]. None will create a snapshot at the latest
+    // ///   version of the table.
+    // //
+    // // FIXME: this needs to change - should consider a new way to incrementally update
+    // // ResolvedTable
+    // pub fn try_new_from(
+    //     existing_snapshot: Arc<ResolvedTable>,
+    //     engine: &dyn Engine,
+    //     version: impl Into<Option<Version>>,
+    // ) -> DeltaResult<Arc<Self>> {
+    //     let old_log_segment = &existing_snapshot.log_segment;
+    //     let old_version = existing_snapshot.version();
+    //     let new_version = version.into();
+    //     if let Some(new_version) = new_version {
+    //         if new_version == old_version {
+    //             // Re-requesting the same version
+    //             return Ok(existing_snapshot.clone());
+    //         }
+    //         if new_version < old_version {
+    //             // Hint is too new: error since this is effectively an incorrect optimization
+    //             return Err(Error::Generic(format!(
+    //                 "Requested snapshot version {} is older than snapshot hint version {}",
+    //                 new_version, old_version
+    //             )));
+    //         }
+    //     }
+
+    //     let log_root = old_log_segment.log_root.clone();
+    //     let storage = engine.storage_handler();
+
+    //     // Start listing just after the previous segment's checkpoint, if any
+    //     let listing_start = old_log_segment.checkpoint_version.unwrap_or(0) + 1;
+
+    //     // Check for new commits (and CRC)
+    //     let new_listed_files = log_segment::list_log_files_with_version(
+    //         storage.as_ref(),
+    //         &log_root,
+    //         Some(listing_start),
+    //         new_version,
+    //     )?;
+
+    //     // NB: we need to check both checkpoints and commits since we filter commits at and below
+    //     // the checkpoint version. Example: if we have a checkpoint + commit at version 1, the log
+    //     // listing above will only return the checkpoint and not the commit.
+    //     if new_listed_files.ascending_commit_files.is_empty()
+    //         && new_listed_files.checkpoint_parts.is_empty()
+    //     {
+    //         match new_version {
+    //             Some(new_version) if new_version != old_version => {
+    //                 // No new commits, but we are looking for a new version
+    //                 return Err(Error::Generic(format!(
+    //                     "Requested snapshot version {} is newer than the latest version {}",
+    //                     new_version, old_version
+    //                 )));
+    //             }
+    //             _ => {
+    //                 // No new commits, just return the same snapshot
+    //                 return Ok(existing_snapshot.clone());
+    //             }
+    //         }
+    //     }
+
+    //     // create a log segment just from existing_checkpoint.version -> new_version
+    //     // OR could be from 1 -> new_version
+    //     let mut new_log_segment =
+    //         LogSegment::try_new(new_listed_files, log_root.clone(), new_version)?;
+
+    //     let new_end_version = new_log_segment.end_version;
+    //     if new_end_version < old_version {
+    //         // we should never see a new log segment with a version < the existing snapshot
+    //         // version, that would mean a commit was incorrectly deleted from the log
+    //         return Err(Error::Generic(format!(
+    //             "Unexpected state: The newest version in the log {} is older than the old version {}",
+    //             new_end_version, old_version)));
+    //     }
+    //     if new_end_version == old_version {
+    //         // No new commits, just return the same snapshot
+    //         return Ok(existing_snapshot.clone());
+    //     }
+
+    //     if new_log_segment.checkpoint_version.is_some() {
+    //         // we have a checkpoint in the new LogSegment, just construct a new snapshot from that
+    //         let snapshot = Self::try_new_from_log_segment(
+    //             existing_snapshot.table_root().clone(),
+    //             new_log_segment,
+    //             engine,
+    //         );
+    //         return Ok(Arc::new(snapshot?));
+    //     }
+
+    //     // after this point, we incrementally update the snapshot with the new log segment.
+    //     // first we remove the 'overlap' in commits, example:
+    //     //
+    //     //    old logsegment checkpoint1-commit1-commit2-commit3
+    //     // 1. new logsegment             commit1-commit2-commit3
+    //     // 2. new logsegment             commit1-commit2-commit3-commit4
+    //     // 3. new logsegment                     checkpoint2+commit2-commit3-commit4
+    //     //
+    //     // retain does
+    //     // 1. new logsegment             [empty] -> caught above
+    //     // 2. new logsegment             [commit4]
+    //     // 3. new logsegment             [checkpoint2-commit3] -> caught above
+    //     new_log_segment
+    //         .ascending_commit_files
+    //         .retain(|log_path| old_version < log_path.version);
+
+    //     // we have new commits and no new checkpoint: we replay new commits for P+M and then
+    //     // create a new snapshot by combining LogSegments and building a new TableConfiguration
+    //     let (new_metadata, new_protocol) = new_log_segment.protocol_and_metadata(engine)?;
+    //     let resolved_metadata = ResolvedMetadata::try_new_from(
+    //         existing_snapshot.table_configuration(),
+    //         new_metadata,
+    //         new_protocol,
+    //         new_log_segment.end_version,
+    //     )?;
+
+    //     // NB: we must add the new log segment to the existing snapshot's log segment
+    //     let mut ascending_commit_files = old_log_segment.ascending_commit_files.clone();
+    //     ascending_commit_files.extend(new_log_segment.ascending_commit_files);
+    //     let mut ascending_compaction_files = old_log_segment.ascending_compaction_files.clone();
+    //     ascending_compaction_files.extend(new_log_segment.ascending_compaction_files);
+
+    //     // Note that we _could_ go backwards if someone deletes a CRC:
+    //     // old listing: 1, 2, 2.crc, 3, 3.crc (latest is 3.crc)
+    //     // new listing: 1, 2, 2.crc, 3        (latest is 2.crc)
+    //     // and we would still pick the new listing's (older) CRC file since it ostensibly still
+    //     // exists
+    //     let latest_crc_file = new_log_segment
+    //         .latest_crc_file
+    //         .or_else(|| old_log_segment.latest_crc_file.clone());
+
+    //     // we can pass in just the old checkpoint parts since by the time we reach this line, we
+    //     // know there are no checkpoints in the new log segment.
+    //     let combined_log_segment = LogSegment::try_new(
+    //         ListedLogFiles {
+    //             ascending_commit_files,
+    //             ascending_compaction_files,
+    //             checkpoint_parts: old_log_segment.checkpoint_parts.clone(),
+    //             latest_crc_file,
+    //         },
+    //         log_root,
+    //         new_version,
+    //     )?;
+    //     Ok(Arc::new(ResolvedTable::new(
+    //         resolved_metadata,
+    //         combined_log_segment,
+    //     )))
+    // }
 
     /// Create a new [`Snapshot`] instance.
     pub(crate) fn try_new_from_log_segment(
@@ -289,11 +492,11 @@ impl ResolvedTable {
         engine: &dyn Engine,
     ) -> DeltaResult<Self> {
         let (metadata, protocol) = log_segment.read_metadata(engine)?;
-        let table_configuration =
+        let resolved_metadata =
             ResolvedMetadata::try_new(metadata, protocol, location, log_segment.end_version)?;
         Ok(Self {
+            resolved_metadata,
             log_segment,
-            resolved_metadata: table_configuration,
         })
     }
 
@@ -397,6 +600,8 @@ impl ResolvedTable {
         domain_metadata_configuration(self.log_segment(), domain, engine)
     }
 }
+
+// TODO: move this last checkpoint stuff to LogSegment (it just helps us do log listing ultimately)
 
 // Note: Schema can not be derived because the checkpoint schema is only known at runtime.
 #[derive(Debug, Deserialize, Serialize)]

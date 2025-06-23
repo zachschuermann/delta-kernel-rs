@@ -32,6 +32,14 @@ use delta_kernel_derive::internal_api;
 /// to validate that Metadata and Protocol are correctly formatted and mutually compatible. If
 /// `try_new` successfully returns `TableConfiguration`, it is also guaranteed that reading the
 /// table is supported.
+//
+// Protocol/Metadata/Version: all required/go together - "PM for table @ version"
+// table_root/log_tail: all required/go together - "let me list this table's files" -> sum of Url +
+// tail
+//
+// FIXME: version must = log tail version
+//
+// also, should we 'nest' the Protocl/Metadata/Version/Url/LogTail inside some other field?
 #[internal_api]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ResolvedMetadata {

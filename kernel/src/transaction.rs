@@ -11,6 +11,7 @@ use crate::expressions::{column_expr, Scalar, StructData};
 use crate::path::ParsedLogPath;
 use crate::resolved_table::ResolvedTable;
 use crate::schema::{MapType, SchemaRef, StructField, StructType};
+use crate::table_configuration::ResolvedMetadata;
 use crate::{DataType, DeltaResult, Engine, EngineData, Expression, IntoEngineData, Version};
 
 use url::Url;
@@ -53,7 +54,7 @@ pub fn get_write_metadata_schema() -> &'static SchemaRef {
 /// txn.commit(&engine)?;
 /// ```
 pub struct Transaction {
-    read_snapshot: Arc<ResolvedTable>,
+    read_snapshot: Arc<ResolvedMetadata>, // TODO: should just be ResolvedMetadata
     operation: Option<String>,
     commit_info: Option<Arc<dyn EngineData>>,
     write_metadata: Vec<Box<dyn EngineData>>,
@@ -85,13 +86,9 @@ impl Transaction {
     /// Instead of using this API, the more typical (user-facing) API is
     /// [Table::new_transaction](crate::table::Table::new_transaction) to create a transaction from
     /// a table automatically backed by the latest snapshot.
-    pub(crate) fn try_new(snapshot: impl Into<Arc<ResolvedTable>>) -> DeltaResult<Self> {
-        let read_snapshot = snapshot.into();
-
+    pub(crate) fn try_new(resolved_metadata: Arc<ResolvedMetadata>) -> DeltaResult<Self> {
         // important! before a read/write to the table we must check it is supported
-        read_snapshot
-            .table_configuration()
-            .ensure_write_supported()?;
+        resolved_metadata.ensure_write_supported()?;
 
         // TODO: unify all these into a (safer) `fn current_time_ms()`
         let commit_timestamp = SystemTime::now()
@@ -101,7 +98,7 @@ impl Transaction {
             .ok_or_else(|| Error::generic("Failed to get current time for commit_timestamp"))?;
 
         Ok(Transaction {
-            read_snapshot,
+            read_snapshot: resolved_metadata,
             operation: None,
             commit_info: None,
             write_metadata: vec![],

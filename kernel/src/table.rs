@@ -76,17 +76,6 @@ impl Table {
         &self.location
     }
 
-    /// Create a [`Snapshot`] of the table corresponding to `version`.
-    ///
-    /// If no version is supplied, a snapshot for the latest version will be created.
-    pub fn snapshot(
-        &self,
-        engine: &dyn Engine,
-        version: Option<Version>,
-    ) -> DeltaResult<ResolvedTable> {
-        ResolvedTable::try_new(self.location.clone(), engine, version)
-    }
-
     /// Create a [`TableChanges`] to get a change data feed for the table between `start_version`,
     /// and `end_version`. If no `end_version` is supplied, the latest version will be used as the
     /// `end_version`.
@@ -102,29 +91,6 @@ impl Table {
             start_version,
             end_version.into(),
         )
-    }
-
-    /// Creates a [`CheckpointWriter`] for generating checkpoints at the specified table version.
-    ///
-    /// See the [`crate::checkpoint`] module documentation for more details on checkpoint types
-    /// and the overall checkpoint process.
-    ///
-    /// # Parameters
-    /// - `engine`: Implementation of [`Engine`] apis.
-    /// - `version`: The version of the table to checkpoint. If [`None`], the latest version of the
-    ///   table will be checkpointed.
-    pub fn checkpoint(
-        &self,
-        engine: &dyn Engine,
-        version: impl Into<Option<Version>>,
-    ) -> DeltaResult<CheckpointWriter> {
-        let snapshot = Arc::new(self.snapshot(engine, version.into())?);
-        CheckpointWriter::try_new(snapshot)
-    }
-
-    /// Create a new write transaction for this table.
-    pub fn new_transaction(&self, engine: &dyn Engine) -> DeltaResult<Transaction> {
-        Transaction::try_new(self.snapshot(engine, None)?)
     }
 }
 
