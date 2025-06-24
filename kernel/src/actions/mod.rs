@@ -173,6 +173,28 @@ pub(crate) struct Metadata {
 }
 
 impl Metadata {
+    pub fn new(
+        id: String,
+        name: Option<String>,
+        description: Option<String>,
+        format: Format,
+        schema_string: String,
+        partition_columns: Vec<String>,
+        created_time: Option<i64>,
+        configuration: HashMap<String, String>,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            description,
+            format,
+            schema_string,
+            partition_columns,
+            created_time,
+            configuration,
+        }
+    }
+
     pub(crate) fn try_new_from_data(data: &dyn EngineData) -> DeltaResult<Option<Metadata>> {
         let mut visitor = MetadataVisitor::default();
         visitor.visit_rows_of(data)?;
@@ -243,7 +265,7 @@ where
 impl Protocol {
     /// Try to create a new Protocol instance from reader/writer versions and table features. This
     /// can fail if the protocol is invalid.
-    pub(crate) fn try_new(
+    pub fn try_new(
         min_reader_version: i32,
         min_writer_version: i32,
         reader_features: Option<impl IntoIterator<Item = impl ToString>>,

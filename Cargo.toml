@@ -7,6 +7,9 @@ members = [
     "kernel/examples/*",
     "test-utils",
     "feature-tests",
+    "catalog-test",
+    "uc-catalog",
+    "uc-client",
 ]
 # note that in addition to the members above, the workspace includes examples:
 # - inspect-table
