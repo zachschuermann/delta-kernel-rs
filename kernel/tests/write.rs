@@ -82,9 +82,7 @@ async fn test_commit_info() -> Result<(), Box<dyn std::error::Error>> {
 
         // create a transaction
         let snapshot = Arc::new(Snapshot::try_new(table_url.clone(), &engine, None)?);
-        let txn = snapshot
-            .transaction()?
-            .with_commit_info(commit_info);
+        let txn = snapshot.transaction()?.with_commit_info(commit_info);
 
         // commit!
         txn.commit(&engine)?;
@@ -264,9 +262,7 @@ async fn test_append() -> Result<(), Box<dyn std::error::Error>> {
         let commit_info = new_commit_info()?;
 
         let snapshot = Arc::new(Snapshot::try_new(table_url.clone(), &engine, None)?);
-        let mut txn = snapshot
-            .transaction()?
-            .with_commit_info(commit_info);
+        let mut txn = snapshot.transaction()?.with_commit_info(commit_info);
 
         // create two new arrow record batches to append
         let append_data = [[1, 2, 3], [4, 5, 6]].map(|data| -> DeltaResult<_> {
@@ -399,9 +395,7 @@ async fn test_append_partitioned() -> Result<(), Box<dyn std::error::Error>> {
         let commit_info = new_commit_info()?;
 
         let snapshot = Arc::new(Snapshot::try_new(table_url.clone(), &engine, None)?);
-        let mut txn = snapshot
-            .transaction()?
-            .with_commit_info(commit_info);
+        let mut txn = snapshot.transaction()?.with_commit_info(commit_info);
 
         // create two new arrow record batches to append
         let append_data = [[1, 2, 3], [4, 5, 6]].map(|data| -> DeltaResult<_> {
@@ -540,9 +534,7 @@ async fn test_append_invalid_schema() -> Result<(), Box<dyn std::error::Error>> 
         let commit_info = new_commit_info()?;
 
         let snapshot = Arc::new(Snapshot::try_new(table_url.clone(), &engine, None)?);
-        let txn = snapshot
-            .transaction()?
-            .with_commit_info(commit_info);
+        let txn = snapshot.transaction()?.with_commit_info(commit_info);
 
         // create two new arrow record batches to append
         let append_data = [["a", "b"], ["c", "d"]].map(|data| -> DeltaResult<_> {
@@ -741,9 +733,7 @@ async fn test_append_timestamp_ntz() -> Result<(), Box<dyn std::error::Error>> {
     let commit_info = new_commit_info()?;
 
     let snapshot = Arc::new(Snapshot::try_new(table_url.clone(), &engine, None)?);
-    let mut txn = snapshot
-        .transaction()?
-        .with_commit_info(commit_info);
+    let mut txn = snapshot.transaction()?.with_commit_info(commit_info);
 
     // Create Arrow data with TIMESTAMP_NTZ values including edge cases
     // These are microseconds since Unix epoch
