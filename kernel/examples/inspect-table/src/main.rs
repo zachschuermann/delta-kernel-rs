@@ -190,7 +190,6 @@ fn try_main() -> DeltaResult<()> {
     )?;
 
     let snapshot = Snapshot::try_new(url, &engine, None)?;
-    println!("Reading {}", snapshot.table_root());
 
     match cli.command {
         Commands::TableVersion => {

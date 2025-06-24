@@ -1,11 +1,12 @@
 //! Various utility functions/macros used throughout the kernel
-use crate::table_properties::TableProperties;
-use crate::{DeltaResult, Error};
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use std::borrow::Cow;
 use std::ops::Deref;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::table_properties::TableProperties;
+use crate::{DeltaResult, Error};
+use delta_kernel_derive::internal_api;
 
 use url::Url;
 
@@ -22,7 +23,8 @@ pub(crate) use require;
 
 /// Try to parse string uri into a URL for a table path. This will do it's best to handle things
 /// like `/local/paths`, and even `../relative/paths`.
-pub fn try_parse_uri(uri: impl AsRef<str>) -> DeltaResult<Url> {
+#[internal_api]
+pub(crate) fn try_parse_uri(uri: impl AsRef<str>) -> DeltaResult<Url> {
     let uri = uri.as_ref();
     let uri_type = resolve_uri_type(uri)?;
     let url = match uri_type {

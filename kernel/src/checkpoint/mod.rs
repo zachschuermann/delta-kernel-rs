@@ -1,6 +1,6 @@
 //! This module implements the API for writing single-file checkpoints.
 //!
-//! The entrypoint for this API is [`Snapshot::checkpoint`].
+//! The entry point for this API is [`Snapshot::checkpoint`].
 //!
 //! ## Checkpoint Types and Selection Logic
 //! This API supports two checkpoint types, selected based on table features:

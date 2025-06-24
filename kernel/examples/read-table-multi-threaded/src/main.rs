@@ -130,7 +130,6 @@ fn try_main() -> DeltaResult<()> {
     let engine = DefaultEngine::try_new(&url, options, Arc::new(TokioBackgroundExecutor::new()))?;
 
     let snapshot = Snapshot::try_new(url, &engine, None)?;
-    println!("Reading {}", snapshot.table_root());
 
     // process the columns requested and build a schema from them
     let read_schema_opt = cli
