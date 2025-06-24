@@ -19,7 +19,7 @@ use delta_kernel::parquet::arrow::async_reader::{
 use delta_kernel::engine::arrow_conversion::TryFromKernel as _;
 use delta_kernel::engine::default::executor::tokio::TokioBackgroundExecutor;
 use delta_kernel::engine::default::DefaultEngine;
-use delta_kernel::{engine::arrow_data::ArrowEngineData, DeltaResult, Snapshot};
+use delta_kernel::{DeltaResult, Snapshot};
 
 use futures::{stream::TryStreamExt, StreamExt};
 use itertools::Itertools;
@@ -27,7 +27,9 @@ use paste::paste;
 use url::Url;
 
 mod common;
-use common::{load_test_data, to_arrow};
+use common::load_test_data;
+
+use test_utils::to_arrow;
 
 // NB adapted from DAT: read all parquet files in the directory and concatenate them
 async fn read_expected(path: &Path) -> DeltaResult<RecordBatch> {
@@ -186,7 +188,7 @@ async fn latest_snapshot_test(
 
     let expected = read_expected(&expected_path.expect("expect an expected dir")).await?;
 
-    let schema = Arc::new(Schema::try_from_kernel(scan.schema().as_ref())?);
+    let schema = Arc::new(Schema::try_from_kernel(scan.logical_schema().as_ref())?);
     let result = concat_batches(&schema, &batches)?;
     let result = sort_record_batch(result)?;
     let expected = sort_record_batch(expected)?;

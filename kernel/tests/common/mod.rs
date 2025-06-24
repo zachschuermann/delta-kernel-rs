@@ -6,7 +6,7 @@ use delta_kernel::arrow::util::pretty::pretty_format_batches;
 use itertools::Itertools;
 use url::Url;
 
-use crate::ArrowEngineData;
+use delta_kernel::engine::arrow_data::ArrowEngineData;
 use delta_kernel::scan::Scan;
 use delta_kernel::{DeltaResult, Engine, EngineData, Snapshot};
 
@@ -53,7 +53,6 @@ pub(crate) fn load_test_data(
     archive.unpack(temp_dir.path())?;
     Ok(temp_dir)
 }
-
 pub(crate) fn to_arrow(data: Box<dyn EngineData>) -> DeltaResult<RecordBatch> {
     Ok(data
         .into_any()

@@ -1,13 +1,13 @@
 //! Various utility functions/macros used throughout the kernel
+use crate::table_properties::TableProperties;
+use crate::{DeltaResult, Error};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use std::borrow::Cow;
 use std::ops::Deref;
 use std::path::PathBuf;
 
 use url::Url;
-
-use crate::delta_kernel_derive::internal_api;
-use crate::{DeltaResult, Error};
 
 /// convenient way to return an error if a condition isn't true
 macro_rules! require {
@@ -22,8 +22,7 @@ pub(crate) use require;
 
 /// Try to parse string uri into a URL for a table path. This will do it's best to handle things
 /// like `/local/paths`, and even `../relative/paths`.
-#[internal_api]
-pub(crate) fn try_parse_uri(uri: impl AsRef<str>) -> DeltaResult<Url> {
+pub fn try_parse_uri(uri: impl AsRef<str>) -> DeltaResult<Url> {
     let uri = uri.as_ref();
     let uri_type = resolve_uri_type(uri)?;
     let url = match uri_type {
@@ -91,6 +90,29 @@ fn resolve_uri_type(table_uri: impl AsRef<str>) -> DeltaResult<UriType> {
     } else {
         Ok(UriType::LocalPath(table_uri.deref().into()))
     }
+}
+
+/// Calculates the transaction expiration timestamp based on table properties.
+/// Returns None if set_transaction_retention_duration is not set.
+pub(crate) fn calculate_transaction_expiration_timestamp(
+    table_properties: &TableProperties,
+) -> DeltaResult<Option<i64>> {
+    table_properties
+        .set_transaction_retention_duration
+        .map(|duration| -> DeltaResult<i64> {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|e| Error::generic(format!("Failed to get current time: {}", e)))?;
+
+            let now_ms = i64::try_from(now.as_millis())
+                .map_err(|_| Error::generic("Current timestamp exceeds i64 millisecond range"))?;
+
+            let expiration_ms = i64::try_from(duration.as_millis())
+                .map_err(|_| Error::generic("Retention duration exceeds i64 millisecond range"))?;
+
+            Ok(now_ms - expiration_ms)
+        })
+        .transpose()
 }
 
 #[cfg(test)]

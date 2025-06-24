@@ -94,6 +94,7 @@ use crate::log_replay::LogReplayProcessor;
 use crate::path::ParsedLogPath;
 use crate::schema::{DataType, SchemaRef, StructField, StructType, ToSchema as _};
 use crate::snapshot::{Snapshot, LAST_CHECKPOINT_FILE_NAME};
+use crate::utils::calculate_transaction_expiration_timestamp;
 use crate::{DeltaResult, Engine, EngineData, Error, EvaluationHandlerExtension, FileMeta};
 use log_replay::{CheckpointBatch, CheckpointLogReplayProcessor};
 
@@ -217,6 +218,10 @@ impl CheckpointWriter {
 
         Ok(Self { snapshot, version })
     }
+
+    fn get_transaction_expiration_timestamp(&self) -> DeltaResult<Option<i64>> {
+        calculate_transaction_expiration_timestamp(self.snapshot.table_properties())
+    }
     /// Returns the URL where the checkpoint file should be written.
     ///
     /// This method generates the checkpoint path based on the table's root and the version
@@ -234,7 +239,6 @@ impl CheckpointWriter {
         )
         .map(|parsed| parsed.location)
     }
-
     /// Returns the checkpoint data to be written to the checkpoint file.
     ///
     /// This method reads the actions from the log segment and processes them
@@ -266,9 +270,11 @@ impl CheckpointWriter {
         )?;
 
         // Create iterator over actions for checkpoint data
-        let checkpoint_data =
-            CheckpointLogReplayProcessor::new(self.deleted_file_retention_timestamp()?)
-                .process_actions_iter(actions);
+        let checkpoint_data = CheckpointLogReplayProcessor::new(
+            self.deleted_file_retention_timestamp()?,
+            self.get_transaction_expiration_timestamp()?,
+        )
+        .process_actions_iter(actions);
 
         let checkpoint_metadata =
             is_v2_checkpoints_supported.then(|| self.create_checkpoint_metadata_batch(engine));
@@ -293,7 +299,7 @@ impl CheckpointWriter {
     /// - `metadata`: The metadata of the written checkpoint file
     /// - `checkpoint_data`: The exhausted checkpoint data iterator
     ///
-    /// # Returns: [`variant@Ok`] if the checkpoint was successfully finalized
+    /// # Returns: `Ok` if the checkpoint was successfully finalized
     // Internally, this method:
     // 1. Validates that the checkpoint data iterator is fully exhausted
     // 2. Creates the `_last_checkpoint` data with `create_last_checkpoint_data`
