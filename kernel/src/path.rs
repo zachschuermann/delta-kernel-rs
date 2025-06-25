@@ -18,24 +18,15 @@ const MULTIPART_PART_LEN: usize = 10;
 const UUID_PART_LEN: usize = 36;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[internal_api]
-pub(crate) enum LogPathFileType {
+pub enum LogPathFileType {
     Commit,
     SinglePartCheckpoint,
-    #[allow(unused)]
     UuidCheckpoint(String),
     // NOTE: Delta spec doesn't actually say, but checkpoint part numbers are effectively 31-bit
     // unsigned integers: Negative values are never allowed, but Java integer types are always
     // signed. Approximate that as u32 here.
-    #[allow(unused)]
-    MultiPartCheckpoint {
-        part_num: u32,
-        num_parts: u32,
-    },
-    #[allow(unused)]
-    CompactedCommit {
-        hi: Version,
-    },
+    MultiPartCheckpoint { part_num: u32, num_parts: u32 },
+    CompactedCommit { hi: Version },
     Crc,
     Unknown,
 }
@@ -82,8 +73,7 @@ impl AsUrl for Url {
 
 impl<Location: AsUrl> ParsedLogPath<Location> {
     // NOTE: We can't actually impl TryFrom because Option<T> is a foreign struct even if T is local.
-    #[internal_api]
-    pub(crate) fn try_from(location: Location) -> DeltaResult<Option<ParsedLogPath<Location>>> {
+    pub fn try_from(location: Location) -> DeltaResult<Option<ParsedLogPath<Location>>> {
         let url = location.as_url();
         let filename = url
             .path_segments()
