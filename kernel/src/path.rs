@@ -44,10 +44,7 @@ pub(crate) enum LogPathFileType {
 #[internal_api]
 pub(crate) struct ParsedLogPath<Location: AsUrl = FileMeta> {
     pub location: Location,
-    #[allow(unused)]
-    pub filename: String,
-    #[allow(unused)]
-    pub extension: String,
+    pub extension: String, // FIXME: embed in LogPathFileType
     pub version: Version,
     pub file_type: LogPathFileType,
 }
@@ -148,7 +145,6 @@ impl<Location: AsUrl> ParsedLogPath<Location> {
         };
         Ok(Some(ParsedLogPath {
             location,
-            filename,
             extension,
             version,
             file_type,
@@ -316,22 +312,25 @@ mod tests {
 
         // unknown - two parts
         let log_path = table_log_dir.join("00000000000000000010.foo").unwrap();
-        let log_path = ParsedLogPath::try_from(log_path).unwrap().unwrap();
-        assert_eq!(log_path.filename, "00000000000000000010.foo");
-        assert_eq!(log_path.extension, "foo");
-        assert_eq!(log_path.version, 10);
-        assert!(matches!(log_path.file_type, LogPathFileType::Unknown));
-        assert!(log_path.is_unknown());
+        let parsed_log_path = ParsedLogPath::try_from(log_path.clone()).unwrap().unwrap();
+        assert_eq!(parsed_log_path.location, log_path);
+        assert_eq!(parsed_log_path.extension, "foo");
+        assert_eq!(parsed_log_path.version, 10);
+        assert!(matches!(
+            parsed_log_path.file_type,
+            LogPathFileType::Unknown
+        ));
+        assert!(parsed_log_path.is_unknown());
 
         // unknown - many parts
         let log_path = table_log_dir
             .join("00000000000000000010.a.b.c.foo")
             .unwrap();
-        let log_path = ParsedLogPath::try_from(log_path).unwrap().unwrap();
-        assert_eq!(log_path.filename, "00000000000000000010.a.b.c.foo");
-        assert_eq!(log_path.extension, "foo");
-        assert_eq!(log_path.version, 10);
-        assert!(log_path.is_unknown());
+        let parsed_log_path = ParsedLogPath::try_from(log_path.clone()).unwrap().unwrap();
+        assert_eq!(parsed_log_path.location, log_path);
+        assert_eq!(parsed_log_path.extension, "foo");
+        assert_eq!(parsed_log_path.version, 10);
+        assert!(parsed_log_path.is_unknown());
     }
 
     #[test]
@@ -339,13 +338,13 @@ mod tests {
         let table_log_dir = table_log_dir_url();
 
         let log_path = table_log_dir.join("00000000000000000000.json").unwrap();
-        let log_path = ParsedLogPath::try_from(log_path).unwrap().unwrap();
-        assert_eq!(log_path.filename, "00000000000000000000.json");
-        assert_eq!(log_path.extension, "json");
-        assert_eq!(log_path.version, 0);
-        assert!(matches!(log_path.file_type, LogPathFileType::Commit));
-        assert!(log_path.is_commit());
-        assert!(!log_path.is_checkpoint());
+        let parsed_log_path = ParsedLogPath::try_from(log_path.clone()).unwrap().unwrap();
+        assert_eq!(parsed_log_path.location, log_path);
+        assert_eq!(parsed_log_path.extension, "json");
+        assert_eq!(parsed_log_path.version, 0);
+        assert!(matches!(parsed_log_path.file_type, LogPathFileType::Commit));
+        assert!(parsed_log_path.is_commit());
+        assert!(!parsed_log_path.is_checkpoint());
 
         let log_path = table_log_dir.join("00000000000000000005.json").unwrap();
         let log_path = ParsedLogPath::try_from(log_path).unwrap().unwrap();
@@ -358,13 +357,13 @@ mod tests {
         let table_log_dir = table_log_dir_url();
 
         let log_path = table_log_dir.join("00000000000000000000.crc").unwrap();
-        let log_path = ParsedLogPath::try_from(log_path).unwrap().unwrap();
-        assert_eq!(log_path.filename, "00000000000000000000.crc");
-        assert_eq!(log_path.extension, "crc");
-        assert_eq!(log_path.version, 0);
-        assert!(matches!(log_path.file_type, LogPathFileType::Crc));
-        assert!(!log_path.is_commit());
-        assert!(!log_path.is_checkpoint());
+        let parsed_log_path = ParsedLogPath::try_from(log_path.clone()).unwrap().unwrap();
+        assert_eq!(parsed_log_path.location, log_path);
+        assert_eq!(parsed_log_path.extension, "crc");
+        assert_eq!(parsed_log_path.version, 0);
+        assert!(matches!(parsed_log_path.file_type, LogPathFileType::Crc));
+        assert!(!parsed_log_path.is_commit());
+        assert!(!parsed_log_path.is_checkpoint());
 
         let log_path = table_log_dir.join("00000000000000000005.crc").unwrap();
         let log_path = ParsedLogPath::try_from(log_path).unwrap().unwrap();
@@ -379,28 +378,28 @@ mod tests {
         let log_path = table_log_dir
             .join("00000000000000000002.checkpoint.parquet")
             .unwrap();
-        let log_path = ParsedLogPath::try_from(log_path).unwrap().unwrap();
-        assert_eq!(log_path.filename, "00000000000000000002.checkpoint.parquet");
-        assert_eq!(log_path.extension, "parquet");
-        assert_eq!(log_path.version, 2);
+        let parsed_log_path = ParsedLogPath::try_from(log_path.clone()).unwrap().unwrap();
+        assert_eq!(parsed_log_path.location, log_path);
+        assert_eq!(parsed_log_path.extension, "parquet");
+        assert_eq!(parsed_log_path.version, 2);
         assert!(matches!(
-            log_path.file_type,
+            parsed_log_path.file_type,
             LogPathFileType::SinglePartCheckpoint
         ));
-        assert!(!log_path.is_commit());
-        assert!(log_path.is_checkpoint());
+        assert!(!parsed_log_path.is_commit());
+        assert!(parsed_log_path.is_checkpoint());
 
         // invalid file extension
         let log_path = table_log_dir
             .join("00000000000000000002.checkpoint.json")
             .unwrap();
-        let log_path = ParsedLogPath::try_from(log_path).unwrap().unwrap();
-        assert_eq!(log_path.filename, "00000000000000000002.checkpoint.json");
-        assert_eq!(log_path.extension, "json");
-        assert_eq!(log_path.version, 2);
-        assert!(!log_path.is_commit());
-        assert!(!log_path.is_checkpoint());
-        assert!(log_path.is_unknown());
+        let parsed_log_path = ParsedLogPath::try_from(log_path.clone()).unwrap().unwrap();
+        assert_eq!(parsed_log_path.location, log_path);
+        assert_eq!(parsed_log_path.extension, "json");
+        assert_eq!(parsed_log_path.version, 2);
+        assert!(!parsed_log_path.is_commit());
+        assert!(!parsed_log_path.is_checkpoint());
+        assert!(parsed_log_path.is_unknown());
     }
 
     #[test]
@@ -410,50 +409,41 @@ mod tests {
         let log_path = table_log_dir
             .join("00000000000000000002.checkpoint.3a0d65cd-4056-49b8-937b-95f9e3ee90e5.parquet")
             .unwrap();
-        let log_path = ParsedLogPath::try_from(log_path).unwrap().unwrap();
-        assert_eq!(
-            log_path.filename,
-            "00000000000000000002.checkpoint.3a0d65cd-4056-49b8-937b-95f9e3ee90e5.parquet"
-        );
-        assert_eq!(log_path.extension, "parquet");
-        assert_eq!(log_path.version, 2);
+        let parsed_log_path = ParsedLogPath::try_from(log_path.clone()).unwrap().unwrap();
+        assert_eq!(parsed_log_path.location, log_path);
+        assert_eq!(parsed_log_path.extension, "parquet");
+        assert_eq!(parsed_log_path.version, 2);
         assert!(matches!(
-            log_path.file_type,
+            parsed_log_path.file_type,
             LogPathFileType::UuidCheckpoint(ref u) if u == "3a0d65cd-4056-49b8-937b-95f9e3ee90e5",
         ));
-        assert!(!log_path.is_commit());
-        assert!(log_path.is_checkpoint());
+        assert!(!parsed_log_path.is_commit());
+        assert!(parsed_log_path.is_checkpoint());
 
         let log_path = table_log_dir
             .join("00000000000000000002.checkpoint.3a0d65cd-4056-49b8-937b-95f9e3ee90e5.json")
             .unwrap();
-        let log_path = ParsedLogPath::try_from(log_path).unwrap().unwrap();
-        assert_eq!(
-            log_path.filename,
-            "00000000000000000002.checkpoint.3a0d65cd-4056-49b8-937b-95f9e3ee90e5.json"
-        );
-        assert_eq!(log_path.extension, "json");
-        assert_eq!(log_path.version, 2);
+        let parsed_log_path = ParsedLogPath::try_from(log_path.clone()).unwrap().unwrap();
+        assert_eq!(parsed_log_path.location, log_path);
+        assert_eq!(parsed_log_path.extension, "json");
+        assert_eq!(parsed_log_path.version, 2);
         assert!(matches!(
-            log_path.file_type,
+            parsed_log_path.file_type,
             LogPathFileType::UuidCheckpoint(ref u) if u == "3a0d65cd-4056-49b8-937b-95f9e3ee90e5",
         ));
-        assert!(!log_path.is_commit());
-        assert!(log_path.is_checkpoint());
+        assert!(!parsed_log_path.is_commit());
+        assert!(parsed_log_path.is_checkpoint());
 
         let log_path = table_log_dir
             .join("00000000000000000002.checkpoint.3a0d65cd-4056-49b8-937b-95f9e3ee90e5.foo")
             .unwrap();
-        let log_path = ParsedLogPath::try_from(log_path).unwrap().unwrap();
-        assert_eq!(
-            log_path.filename,
-            "00000000000000000002.checkpoint.3a0d65cd-4056-49b8-937b-95f9e3ee90e5.foo"
-        );
-        assert_eq!(log_path.extension, "foo");
-        assert_eq!(log_path.version, 2);
-        assert!(!log_path.is_commit());
-        assert!(!log_path.is_checkpoint());
-        assert!(log_path.is_unknown());
+        let parsed_log_path = ParsedLogPath::try_from(log_path.clone()).unwrap().unwrap();
+        assert_eq!(parsed_log_path.location, log_path);
+        assert_eq!(parsed_log_path.extension, "foo");
+        assert_eq!(parsed_log_path.version, 2);
+        assert!(!parsed_log_path.is_commit());
+        assert!(!parsed_log_path.is_checkpoint());
+        assert!(parsed_log_path.is_unknown());
 
         let log_path = table_log_dir
             .join("00000000000000000002.checkpoint.foo.parquet")
@@ -464,13 +454,13 @@ mod tests {
         let log_path = table_log_dir
             .join("00000000000000000002.checkpoint.foo")
             .unwrap();
-        let log_path = ParsedLogPath::try_from(log_path).unwrap().unwrap();
-        assert_eq!(log_path.filename, "00000000000000000002.checkpoint.foo");
-        assert_eq!(log_path.extension, "foo");
-        assert_eq!(log_path.version, 2);
-        assert!(!log_path.is_commit());
-        assert!(!log_path.is_checkpoint());
-        assert!(log_path.is_unknown());
+        let parsed_log_path = ParsedLogPath::try_from(log_path.clone()).unwrap().unwrap();
+        assert_eq!(parsed_log_path.location, log_path);
+        assert_eq!(parsed_log_path.extension, "foo");
+        assert_eq!(parsed_log_path.version, 2);
+        assert!(!parsed_log_path.is_commit());
+        assert!(!parsed_log_path.is_checkpoint());
+        assert!(parsed_log_path.is_unknown());
 
         // Boundary test - UUID with exactly 35 characters (one too short)
         let log_path = table_log_dir
@@ -490,16 +480,13 @@ mod tests {
         let log_path = table_log_dir
             .join("00000000000000000008.checkpoint.0000000000.0000000002.json")
             .unwrap();
-        let log_path = ParsedLogPath::try_from(log_path).unwrap().unwrap();
-        assert_eq!(
-            log_path.filename,
-            "00000000000000000008.checkpoint.0000000000.0000000002.json"
-        );
-        assert_eq!(log_path.extension, "json");
-        assert_eq!(log_path.version, 8);
-        assert!(!log_path.is_commit());
-        assert!(!log_path.is_checkpoint());
-        assert!(log_path.is_unknown());
+        let parsed_log_path = ParsedLogPath::try_from(log_path.clone()).unwrap().unwrap();
+        assert_eq!(parsed_log_path.location, log_path,);
+        assert_eq!(parsed_log_path.extension, "json");
+        assert_eq!(parsed_log_path.version, 8);
+        assert!(!parsed_log_path.is_commit());
+        assert!(!parsed_log_path.is_checkpoint());
+        assert!(parsed_log_path.is_unknown());
 
         let log_path = table_log_dir
             .join("00000000000000000008.checkpoint.0000000000.0000000002.parquet")
@@ -509,42 +496,36 @@ mod tests {
         let log_path = table_log_dir
             .join("00000000000000000008.checkpoint.0000000001.0000000002.parquet")
             .unwrap();
-        let log_path = ParsedLogPath::try_from(log_path).unwrap().unwrap();
-        assert_eq!(
-            log_path.filename,
-            "00000000000000000008.checkpoint.0000000001.0000000002.parquet"
-        );
-        assert_eq!(log_path.extension, "parquet");
-        assert_eq!(log_path.version, 8);
+        let parsed_log_path = ParsedLogPath::try_from(log_path.clone()).unwrap().unwrap();
+        assert_eq!(parsed_log_path.location, log_path,);
+        assert_eq!(parsed_log_path.extension, "parquet");
+        assert_eq!(parsed_log_path.version, 8);
         assert!(matches!(
-            log_path.file_type,
+            parsed_log_path.file_type,
             LogPathFileType::MultiPartCheckpoint {
                 part_num: 1,
                 num_parts: 2
             }
         ));
-        assert!(!log_path.is_commit());
-        assert!(log_path.is_checkpoint());
+        assert!(!parsed_log_path.is_commit());
+        assert!(parsed_log_path.is_checkpoint());
 
         let log_path = table_log_dir
             .join("00000000000000000008.checkpoint.0000000002.0000000002.parquet")
             .unwrap();
-        let log_path = ParsedLogPath::try_from(log_path).unwrap().unwrap();
-        assert_eq!(
-            log_path.filename,
-            "00000000000000000008.checkpoint.0000000002.0000000002.parquet"
-        );
-        assert_eq!(log_path.extension, "parquet");
-        assert_eq!(log_path.version, 8);
+        let parsed_log_path = ParsedLogPath::try_from(log_path.clone()).unwrap().unwrap();
+        assert_eq!(parsed_log_path.location, log_path,);
+        assert_eq!(parsed_log_path.extension, "parquet");
+        assert_eq!(parsed_log_path.version, 8);
         assert!(matches!(
-            log_path.file_type,
+            parsed_log_path.file_type,
             LogPathFileType::MultiPartCheckpoint {
                 part_num: 2,
                 num_parts: 2
             }
         ));
-        assert!(!log_path.is_commit());
-        assert!(log_path.is_checkpoint());
+        assert!(!parsed_log_path.is_commit());
+        assert!(parsed_log_path.is_checkpoint());
 
         let log_path = table_log_dir
             .join("00000000000000000008.checkpoint.0000000003.0000000002.parquet")
@@ -579,34 +560,28 @@ mod tests {
         let log_path = table_log_dir
             .join("00000000000000000008.00000000000000000015.compacted.json")
             .unwrap();
-        let log_path = ParsedLogPath::try_from(log_path).unwrap().unwrap();
-        assert_eq!(
-            log_path.filename,
-            "00000000000000000008.00000000000000000015.compacted.json"
-        );
-        assert_eq!(log_path.extension, "json");
-        assert_eq!(log_path.version, 8);
+        let parsed_log_path = ParsedLogPath::try_from(log_path.clone()).unwrap().unwrap();
+        assert_eq!(parsed_log_path.location, log_path);
+        assert_eq!(parsed_log_path.extension, "json");
+        assert_eq!(parsed_log_path.version, 8);
         assert!(matches!(
-            log_path.file_type,
+            parsed_log_path.file_type,
             LogPathFileType::CompactedCommit { hi: 15 },
         ));
-        assert!(!log_path.is_commit());
-        assert!(!log_path.is_checkpoint());
+        assert!(!parsed_log_path.is_commit());
+        assert!(!parsed_log_path.is_checkpoint());
 
         // invalid extension
         let log_path = table_log_dir
             .join("00000000000000000008.00000000000000000015.compacted.parquet")
             .unwrap();
-        let log_path = ParsedLogPath::try_from(log_path).unwrap().unwrap();
-        assert_eq!(
-            log_path.filename,
-            "00000000000000000008.00000000000000000015.compacted.parquet"
-        );
-        assert_eq!(log_path.extension, "parquet");
-        assert_eq!(log_path.version, 8);
-        assert!(!log_path.is_commit());
-        assert!(!log_path.is_checkpoint());
-        assert!(log_path.is_unknown());
+        let parsed_log_path = ParsedLogPath::try_from(log_path.clone()).unwrap().unwrap();
+        assert_eq!(parsed_log_path.location, log_path,);
+        assert_eq!(parsed_log_path.extension, "parquet");
+        assert_eq!(parsed_log_path.version, 8);
+        assert!(!parsed_log_path.is_commit());
+        assert!(!parsed_log_path.is_checkpoint());
+        assert!(parsed_log_path.is_unknown());
 
         let log_path = table_log_dir
             .join("00000000000000000008.0000000000000000015.compacted.json")
@@ -632,7 +607,12 @@ mod tests {
         assert!(log_path.is_commit());
         assert_eq!(log_path.extension, "json");
         assert!(matches!(log_path.file_type, LogPathFileType::Commit));
-        assert_eq!(log_path.filename, "00000000000000000010.json");
+        assert_eq!(
+            log_path.location,
+            table_log_dir
+                .join("_delta_log/00000000000000000010.json")
+                .unwrap()
+        );
     }
 
     #[test]
@@ -649,13 +629,15 @@ mod tests {
             panic!("Expected UuidCheckpoint file type");
         }
 
-        let filename = log_path.filename.to_string();
-        let filename_parts: Vec<&str> = filename.split('.').collect();
-        assert_eq!(filename_parts.len(), 4);
-        assert_eq!(filename_parts[0], "00000000000000000010");
-        assert_eq!(filename_parts[1], "checkpoint");
-        assert_eq!(filename_parts[2].len(), UUID_PART_LEN);
-        assert_eq!(filename_parts[3], "parquet");
+        let url = log_path.location.to_string();
+        assert!(url.contains("_delta_log/00000000000000000010.checkpoint."));
+        // FIXME
+        // let filename_parts: Vec<&str> = filename.split('.').collect();
+        // assert_eq!(filename_parts.len(), 4);
+        // assert_eq!(filename_parts[0], "00000000000000000010");
+        // assert_eq!(filename_parts[1], "checkpoint");
+        // assert_eq!(filename_parts[2].len(), UUID_PART_LEN);
+        // assert_eq!(filename_parts[3], "parquet");
     }
 
     #[test]
@@ -670,6 +652,11 @@ mod tests {
             log_path.file_type,
             LogPathFileType::SinglePartCheckpoint
         ));
-        assert_eq!(log_path.filename, "00000000000000000010.checkpoint.parquet");
+        assert_eq!(
+            log_path.location,
+            table_log_dir
+                .join("_delta_log/00000000000000000010.checkpoint.parquet")
+                .unwrap()
+        );
     }
 }

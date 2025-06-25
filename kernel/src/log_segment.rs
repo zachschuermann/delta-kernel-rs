@@ -610,8 +610,8 @@ pub(crate) fn list_log_files_with_version(
                     }
                     Unknown => {
                         warn!(
-                            "Found file {} with unknown file type {:?} at version {}",
-                            file.filename, file.file_type, version
+                            "Found file {:?} with unknown file type {:?} at version {}",
+                            file, file.file_type, version
                         );
                     }
                 }
