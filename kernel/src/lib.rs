@@ -1,3 +1,5 @@
+#![allow(deprecated)] // FIXME
+
 //! # Delta Kernel
 //!
 //! Delta-kernel-rs is an experimental [Delta](https://github.com/delta-io/delta/) implementation

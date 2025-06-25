@@ -7,7 +7,9 @@ use crate::actions::domain_metadata::domain_metadata_configuration;
 use crate::actions::set_transaction::SetTransactionScanner;
 use crate::actions::{Metadata, Protocol, INTERNAL_DOMAIN_PREFIX};
 use crate::checkpoint::CheckpointWriter;
+use crate::engine::default::storage;
 use crate::log_segment::{self, ListedLogFiles, LogSegment};
+use crate::path::ParsedLogPath;
 use crate::scan::ScanBuilder;
 use crate::schema::{Schema, SchemaRef};
 use crate::table_configuration::TableConfiguration;
@@ -71,6 +73,7 @@ impl Snapshot {
     /// - `engine`: Implementation of [`Engine`] apis.
     /// - `version`: target version of the [`Snapshot`]. None will create a snapshot at the latest
     ///   version of the table.
+    #[deprecated(note = "use `Snapshot::path_try_new`")]
     pub fn try_from_uri(
         uri: impl AsRef<str>,
         engine: &dyn Engine,
@@ -88,21 +91,60 @@ impl Snapshot {
     /// - `engine`: Implementation of [`Engine`] apis.
     /// - `version`: target version of the [`Snapshot`]. None will create a snapshot at the latest
     ///   version of the table.
+    #[deprecated(note = "use `Snapshot::path_try_new`")]
     pub fn try_new(
         table_root: Url,
         engine: &dyn Engine,
         version: Option<Version>,
     ) -> DeltaResult<Self> {
+        Self::path_try_new(engine, table_root, vec![], version)
+    }
+
+    // 1. check if log_tail is complete (i.e. 0-commit or checkpoint rooted - note only commits
+    //    supported for now)
+    // 2. if complete, create LogSegment directly
+    // 3. if incomplete, do file listing to complete it
+    // 4. then create LogSegment and do PM replay to get TableConfiguration
+    pub fn path_try_new(
+        engine: &dyn Engine,
+        table_root: Url,
+        log_tail: Vec<ParsedLogPath>,
+        version: Option<Version>,
+    ) -> DeltaResult<Self> {
+        // maybe?
+        // let log = DeltaLog::new(table_root.clone(), log_tail, version);
         let storage = engine.storage_handler();
         let log_root = table_root.join("_delta_log/")?;
-
         let checkpoint_hint = read_last_checkpoint(storage.as_ref(), &log_root)?;
-
         let log_segment =
             LogSegment::for_snapshot(storage.as_ref(), log_root, checkpoint_hint, version)?;
 
         // try_new_from_log_segment will ensure the protocol is supported
         Self::try_new_from_log_segment(table_root, log_segment, engine)
+    }
+
+    // Follow up: could make TableConfiguration public as intermediate type which you can build
+    // transactions from instead of requiring full Snapshot (with LogSegment).
+    //
+    // Right now since we require log segment in Snapshot, we are really only skipping PM replay
+    pub fn metadata_try_new(
+        engine: &dyn Engine,
+        table_root: Url,
+        log_tail: Vec<ParsedLogPath>,
+        protocol: Protocol,
+        metadata: Metadata,
+        version: Version,
+    ) -> DeltaResult<Self> {
+        let log_root = table_root.join("_delta_log/")?;
+        let table_configuration =
+            TableConfiguration::try_new(metadata, protocol, table_root, version)?;
+        let log_segment = LogSegment::for_snapshot(
+            engine.storage_handler().as_ref(),
+            log_root,
+            None, // no checkpoint hint
+            Some(version),
+        )?;
+        Ok(Self::new(log_segment, table_configuration))
     }
 
     /// Create a new [`Snapshot`] instance from an existing [`Snapshot`]. This is useful when you
