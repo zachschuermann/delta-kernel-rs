@@ -115,9 +115,7 @@ impl Snapshot {
         // let log = DeltaLog::new(table_root.clone(), log_tail, version);
         let storage = engine.storage_handler();
         let log_root = table_root.join("_delta_log/")?;
-        let checkpoint_hint = read_last_checkpoint(storage.as_ref(), &log_root)?;
-        let log_segment =
-            LogSegment::for_snapshot(storage.as_ref(), log_root, checkpoint_hint, version)?;
+        let log_segment = LogSegment::for_snapshot2(storage.as_ref(), log_root, log_tail, version)?;
 
         // try_new_from_log_segment will ensure the protocol is supported
         Self::try_new_from_log_segment(table_root, log_segment, engine)
@@ -138,10 +136,10 @@ impl Snapshot {
         let log_root = table_root.join("_delta_log/")?;
         let table_configuration =
             TableConfiguration::try_new(metadata, protocol, table_root, version)?;
-        let log_segment = LogSegment::for_snapshot(
+        let log_segment = LogSegment::for_snapshot2(
             engine.storage_handler().as_ref(),
             log_root,
-            None, // no checkpoint hint
+            log_tail,
             Some(version),
         )?;
         Ok(Self::new(log_segment, table_configuration))
@@ -469,7 +467,7 @@ pub(crate) struct LastCheckpointHint {
 /// cause failure.
 ///
 /// TODO: java kernel retries three times before failing, should we do the same?
-fn read_last_checkpoint(
+pub(crate) fn read_last_checkpoint(
     storage: &dyn StorageHandler,
     log_root: &Url,
 ) -> DeltaResult<Option<LastCheckpointHint>> {
