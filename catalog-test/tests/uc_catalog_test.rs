@@ -27,17 +27,17 @@ fn dumb_test() -> Result<(), Box<dyn std::error::Error>> {
     // other API idea: table.at_version(v).resolve(engine)
     // let resolved_table = table.resolve(None, engine.as_ref())?;
 
-    // let resolved_table =
-    //     Snapshot::try_new(table.table_root().clone(), vec![], engine.as_ref(), None)?;
+    let resolved_table =
+        Snapshot::path_try_new(engine.as_ref(), table.table_root().clone(), vec![], None)?;
 
-    // // now we have the usual kernel APIs
-    // let scan = resolved_table.into_scan_builder().build()?;
-    // let data = scan.execute(engine)?;
+    // now we have the usual kernel APIs
+    let scan = resolved_table.into_scan_builder().build()?;
+    let data = scan.execute(engine)?;
 
-    // for batch in data {
-    //     let batch = ArrowEngineData::try_from_engine_data(batch?.raw_data?)?;
-    //     println!("RecordBatch: {:?}", batch.record_batch());
-    // }
+    for batch in data {
+        let batch = ArrowEngineData::try_from_engine_data(batch?.raw_data?)?;
+        println!("RecordBatch: {:?}", batch.record_batch());
+    }
 
     Ok(())
 }
@@ -60,24 +60,25 @@ fn smart_catalog_test() -> Result<(), Box<dyn std::error::Error>> {
     // let resolved_table = table.at_version(v).resolve(engine)
     // let resolved_table = table.resolve(engine.as_ref())?; // latest
 
-    // how do we want to handle this bounday? lots of clones are gross
-    // let resolved_table = ResolvedTable::try_new_from_metadata(
-    //     table.table_root().clone(),
-    //     vec![], // FIXME:
-    //     table.protocol().clone(),
-    //     table.metadata().clone(),
-    //     table.latest_version(),
-    //     engine.as_ref(),
-    // )?;
+    // how do we want to handle this boundary? lots of clones are gross. table should pass
+    // ownership?
+    let resolved_table = Snapshot::metadata_try_new(
+        engine.as_ref(),
+        table.table_root().clone(),
+        vec![],
+        table.protocol().clone(),
+        table.metadata().clone(),
+        table.latest_version(),
+    )?;
 
-    // // now we have the usual kernel APIs
-    // let scan = resolved_table.into_scan_builder().build()?;
-    // let data = scan.execute(engine)?;
+    // now we have the usual kernel APIs
+    let scan = resolved_table.into_scan_builder().build()?;
+    let data = scan.execute(engine)?;
 
-    // for batch in data {
-    //     let batch = ArrowEngineData::try_from_engine_data(batch?.raw_data?)?;
-    //     println!("RecordBatch: {:?}", batch.record_batch());
-    // }
+    for batch in data {
+        let batch = ArrowEngineData::try_from_engine_data(batch?.raw_data?)?;
+        println!("RecordBatch: {:?}", batch.record_batch());
+    }
 
     Ok(())
 }
