@@ -32,8 +32,7 @@ pub enum LogPathFileType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[internal_api]
-pub(crate) struct ParsedLogPath<Location: AsUrl = FileMeta> {
+pub struct ParsedLogPath<Location: AsUrl = FileMeta> {
     pub location: Location,
     #[allow(unused)]
     pub filename: String,
