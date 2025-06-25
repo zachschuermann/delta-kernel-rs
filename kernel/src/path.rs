@@ -33,13 +33,13 @@ pub enum LogPathFileType {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedLogPath<Location: AsUrl = FileMeta> {
-    pub location: Location,
+    pub(crate) location: Location,
     #[allow(unused)]
-    pub filename: String,
+    pub(crate) filename: String,
     #[allow(unused)]
-    pub extension: String,
-    pub version: Version,
-    pub file_type: LogPathFileType,
+    pub(crate) extension: String,
+    pub(crate) version: Version,
+    pub(crate) file_type: LogPathFileType,
 }
 
 // Internal helper used by TryFrom<FileMeta> below. It parses a fixed-length string into the numeric
