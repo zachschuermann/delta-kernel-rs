@@ -73,12 +73,12 @@ impl Snapshot {
     /// - `engine`: Implementation of [`Engine`] apis.
     /// - `version`: target version of the [`Snapshot`]. None will create a snapshot at the latest
     ///   version of the table.
-    #[deprecated(note = "use `Snapshot::path_try_new`")]
     pub fn try_from_uri(
         uri: impl AsRef<str>,
         engine: &dyn Engine,
         version: Option<Version>,
     ) -> DeltaResult<Self> {
+        // TODO: check not catalogmanaged
         let url = try_parse_uri(uri)?;
         Self::try_new(url, engine, version)
     }
@@ -91,12 +91,12 @@ impl Snapshot {
     /// - `engine`: Implementation of [`Engine`] apis.
     /// - `version`: target version of the [`Snapshot`]. None will create a snapshot at the latest
     ///   version of the table.
-    #[deprecated(note = "use `Snapshot::path_try_new`")]
     pub fn try_new(
         table_root: Url,
         engine: &dyn Engine,
         version: Option<Version>,
     ) -> DeltaResult<Self> {
+        // TODO: check not catalogmanaged
         Self::path_try_new(engine, table_root, vec![], version)
     }
 
