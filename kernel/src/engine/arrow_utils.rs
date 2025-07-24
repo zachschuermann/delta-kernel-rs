@@ -310,6 +310,7 @@ fn get_indices(
         let field_info = requested_schema.fields.get_full(field.name());
         (parquet_index, field, field_info)
     });
+
     for (parquet_index, field, field_info) in all_field_info {
         debug!(
             "Getting indices for field {} with offset {parquet_offset}, with index {parquet_index}",
@@ -323,12 +324,15 @@ fn get_indices(
             }
             match field.data_type() {
                 ArrowDataType::Struct(fields) => {
-                    if let DataType::Struct(ref requested_schema)
-                    | DataType::Variant(ref requested_schema) = requested_field.data_type
-                    {
+                    let requested_schema = match &requested_field.data_type {
+                        DataType::Struct(schema) => Some(schema.as_ref()),
+                        DataType::Variant(variant) => Some(&***variant),
+                        _ => None,
+                    };
+                    if let Some(requested_schema) = requested_schema {
                         let (parquet_advance, children) = get_indices(
                             parquet_index + parquet_offset,
-                            requested_schema.as_ref(),
+                            requested_schema,
                             fields,
                             mask_indices,
                         )?;

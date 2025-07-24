@@ -588,6 +588,54 @@ impl PrimitiveType {
     }
 }
 
+/// The Variant type. Implements `Deref` to `StructType`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VariantType(pub(crate) StructType);
+
+impl VariantType {
+    fn new(struct_type: StructType) -> Self {
+        VariantType(struct_type)
+    }
+
+    fn unshredded() -> Self {
+        VariantType(StructType::new([
+            StructField::not_null("metadata", DataType::BINARY),
+            StructField::not_null("value", DataType::BINARY),
+        ]))
+    }
+}
+
+impl Serialize for VariantType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str("variant")
+    }
+}
+
+impl<'de> Deserialize<'de> for VariantType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let str_value = String::deserialize(deserializer)?;
+        require!(
+            str_value == "variant",
+            serde::de::Error::custom(format!("Invalid variant: {str_value}"))
+        );
+        Ok(VariantType::unshredded())
+    }
+}
+
+impl std::ops::Deref for VariantType {
+    type Target = StructType;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 fn serialize_decimal<S: serde::Serializer>(
     dtype: &DecimalType,
     serializer: S,
@@ -619,31 +667,6 @@ where
             serde::de::Error::custom(format!("Invalid scale in decimal: {str_value}"))
         })?;
     DecimalType::try_new(precision, scale).map_err(serde::de::Error::custom)
-}
-
-fn serialize_variant<S: serde::Serializer>(
-    _: &StructType,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    serializer.serialize_str("variant")
-}
-
-fn deserialize_variant<'de, D>(deserializer: D) -> Result<Box<StructType>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let str_value = String::deserialize(deserializer)?;
-    require!(
-        str_value == "variant",
-        serde::de::Error::custom(format!("Invalid variant: {str_value}"))
-    );
-    match DataType::unshredded_variant() {
-        DataType::Variant(st) => Ok(st),
-        _ => Err(serde::de::Error::custom(
-            "Issue in DataType::unshredded_variant(). Please raise an issue at ".to_string()
-                + "delta-io/delta-kernel-rs.",
-        )),
-    }
 }
 
 impl Display for PrimitiveType {
@@ -681,13 +704,10 @@ pub enum DataType {
     /// A map stores an arbitrary length collection of key-value pairs
     /// with a single keyType and a single valueType
     Map(Box<MapType>),
-    /// The Variant data type. The physical representation can be flexible to support shredded
-    /// reads. The unshredded schema is `Variant(StructType<metadata: BINARY, value: BINARY>)`.
-    #[serde(
-        serialize_with = "serialize_variant",
-        deserialize_with = "deserialize_variant"
-    )]
-    Variant(Box<StructType>),
+    /// The Variant data type. Internally, the VariantType is just a StructType: the physical
+    /// representation can be flexible to support shredded reads. The unshredded schema is
+    /// `Variant(StructType<metadata: BINARY, value: BINARY>)`.
+    Variant(Box<VariantType>),
 }
 
 impl From<DecimalType> for PrimitiveType {
@@ -764,16 +784,14 @@ impl DataType {
     /// Create a new unshredded [`DataType::Variant`]. This data type is a struct of two not-null
     /// binary fields: `metadata` and `value`.
     pub fn unshredded_variant() -> Self {
-        DataType::variant_type([
-            StructField::not_null("metadata", DataType::BINARY),
-            StructField::not_null("value", DataType::BINARY),
-        ])
+        // TODO: could benefit from an into_fields?
+        DataType::variant_type(VariantType::unshredded().fields().cloned())
     }
 
     /// Create a new [`DataType::Variant`] from the provided fields. For unshredded variants, you
     /// should prefer using [`DataType::unshredded_variant`].
     pub fn variant_type(fields: impl IntoIterator<Item = StructField>) -> Self {
-        DataType::Variant(Box::new(StructType::new(fields)))
+        DataType::Variant(Box::new(VariantType(StructType::new(fields))))
     }
 
     /// Attempt to convert this data type to a [`PrimitiveType`]. Returns `None` if this is a
@@ -873,9 +891,13 @@ pub trait SchemaTransform<'a> {
         self.transform(etype)
     }
 
-    /// Called for each variant values encountered. By default does nothing
-    fn transform_variant(&mut self, etype: &'a DataType) -> Option<Cow<'a, DataType>> {
-        Some(Cow::Borrowed(etype))
+    /// Called for each variant value encountered.
+    // TODO: one could make a case that all of these should just return `Option<Cow<'a, DataType>>`
+    fn transform_variant(&mut self, vtype: &'a VariantType) -> Option<Cow<'a, VariantType>> {
+        self.recurse_into_struct(vtype).map(|stype| match stype {
+            Cow::Borrowed(s) => Cow::Owned(VariantType::new(s.clone())),
+            Cow::Owned(s) => Cow::Owned(VariantType::new(s)),
+        })
     }
 
     /// General entry point for a recursive traversal over any data type. Also invoked internally to
@@ -895,9 +917,9 @@ pub trait SchemaTransform<'a> {
             Map(mtype) => self
                 .transform_map(mtype)?
                 .map_owned_or_else(data_type, DataType::from),
-            Variant(_) => self
-                .transform_variant(data_type)?
-                .map_owned_or_else(data_type, DataType::from),
+            Variant(struct_type) => self
+                .transform_variant(struct_type)?
+                .map_owned_or_else(data_type, |stype| DataType::Variant(Box::new(stype))),
         };
         Some(result)
     }
