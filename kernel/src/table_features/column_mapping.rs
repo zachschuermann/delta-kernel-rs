@@ -2,7 +2,7 @@
 use super::ReaderFeature;
 use crate::actions::Protocol;
 use crate::schema::{
-    ColumnName, DataType, MetadataValue, Schema, SchemaTransform, StructField, VariantType,
+    ColumnName, DataType, MetadataValue, Schema, SchemaTransform, StructField, StructType,
 };
 use crate::table_properties::TableProperties;
 use crate::{DeltaResult, Error};
@@ -157,7 +157,7 @@ impl<'a> SchemaTransform<'a> for ValidateColumnMappings<'a> {
         }
         None
     }
-    fn transform_variant(&mut self, _: &'a VariantType) -> Option<Cow<'a, VariantType>> {
+    fn transform_variant(&mut self, _: &'a StructType) -> Option<Cow<'a, StructType>> {
         // don't recurse into variant's fields, as they are not expected to have column mapping
         // annotations
         // TODO: this changes with icebergcompat right?
