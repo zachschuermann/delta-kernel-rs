@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::convert::identity;
 use std::sync::{Arc, LazyLock};
 
+use crate::actions::crc::try_protocol_metadata_from_crc;
 use crate::actions::visitors::SidecarVisitor;
 use crate::actions::{
     get_log_schema, Metadata, Protocol, ADD_NAME, METADATA_NAME, PROTOCOL_NAME, REMOVE_NAME,
@@ -21,7 +22,6 @@ use crate::{
 };
 use delta_kernel_derive::internal_api;
 
-use crate::actions::crc::ProtocolMetadata;
 use itertools::Itertools;
 use tracing::{debug, warn};
 use url::Url;
@@ -453,24 +453,32 @@ impl LogSegment {
         if let Some(latest_crc_file) = &self.latest_crc_file {
             if self.end_version == latest_crc_file.version {
                 let path = &latest_crc_file.location;
-                let pm = ProtocolMetadata::try_from_crc(path.clone(), engine)?;
-                return Ok((Some(pm.metadata), Some(pm.protocol)));
+                let (protocol, metadata) = try_protocol_metadata_from_crc(path.clone(), engine)?;
+                return Ok((Some(metadata), Some(protocol)));
             }
         }
 
-        // 2. construct a "protocol-metadata log segment"
-        //    a) if we have a CRC file, we only need commits (CRC_version, target_version]
-        //    b) if we don't have a CRC, we proceed as normal
+        // 2. construct a "protocol-metadata log segment" as either:
+        //    a) if we have a CRC file > last checkpoint version, we only need commits from
+        //       (CRC_version, target_version].
+        //    b) if we don't have a CRC, or have a CRC older than most recent checkpoint, we proceed
+        //       as normal (full log segment).
+        //
+        // TODO: leverage log compaction files
         let protocol_metadata_log_segment: Cow<'_, Self> =
             if let Some(latest_crc_file) = &self.latest_crc_file {
-                let mut log_segment = self.clone();
-                log_segment.checkpoint_version = None;
-                log_segment.checkpoint_parts.clear();
-                // only keep commits from CRC_version + 1 to target version
-                log_segment
-                    .ascending_commit_files
-                    .retain(|commit| commit.version > latest_crc_file.version);
-                Cow::Owned(log_segment)
+                if latest_crc_file.version >= self.checkpoint_version.unwrap_or(0) {
+                    let mut log_segment = self.clone();
+                    log_segment.checkpoint_version = None;
+                    log_segment.checkpoint_parts.clear();
+                    // only keep commits from CRC_version + 1 to target version
+                    log_segment
+                        .ascending_commit_files
+                        .retain(|commit| commit.version > latest_crc_file.version);
+                    Cow::Owned(log_segment)
+                } else {
+                    Cow::Borrowed(self)
+                }
             } else {
                 Cow::Borrowed(self)
             };
@@ -497,12 +505,14 @@ impl LogSegment {
         // 4. if we didn't find one of Protocol/Metadata, we can read it from CRC
         if let Some(latest_crc_file) = &self.latest_crc_file {
             let path = &latest_crc_file.location;
-            let pm = ProtocolMetadata::try_from_crc(path.clone(), engine)?;
-            metadata_opt.get_or_insert(pm.metadata);
-            protocol_opt.get_or_insert(pm.protocol);
+            let (protocol, metadata) = try_protocol_metadata_from_crc(path.clone(), engine)?;
+            Ok((
+                metadata_opt.or(Some(metadata)),
+                protocol_opt.or(Some(protocol)),
+            ))
+        } else {
+            Ok((metadata_opt, protocol_opt))
         }
-
-        Ok((metadata_opt, protocol_opt))
     }
 
     // Get the most up-to-date Protocol and Metadata actions

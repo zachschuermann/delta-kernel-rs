@@ -93,37 +93,32 @@ pub(crate) struct DeletedRecordCountsHistogram {
     pub(crate) deleted_record_counts: Vec<i64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ProtocolMetadata {
-    pub(crate) protocol: Protocol,
-    pub(crate) metadata: Metadata,
-}
+/// Attempt to read Protocol and Metadata from a CRC file. This will return an error if
+/// protocol/metadata cannot be found in the CRC file (specification requires both to be
+/// present).
+pub(crate) fn try_protocol_metadata_from_crc(
+    path: FileMeta,
+    engine: &dyn Engine,
+) -> DeltaResult<(Protocol, Metadata)> {
+    let json_handler = engine.json_handler();
+    let crc_schema = Crc::to_schema().into();
 
-impl ProtocolMetadata {
-    /// Attempt to read Protocol and Metadata from a CRC file. This will return an error if
-    /// protocol/metadata cannot be found in the CRC file (specification requires both to be
-    /// present).
-    pub(crate) fn try_from_crc(path: FileMeta, engine: &dyn Engine) -> DeltaResult<Self> {
-        let json = engine.json_handler();
-        let crc_schema = Crc::to_schema().into();
+    let mut crc_data = json_handler.read_json_files(&[path], crc_schema, None)?;
+    let crc_batch = crc_data.next().ok_or(Error::generic(
+        "CRC file should contain exactly one JSON object (and therefore one batch)",
+    ))?;
 
-        let mut crc_data = json.read_json_files(&[path], crc_schema, None)?;
-        let crc_batch = crc_data.next().ok_or(Error::generic(
-            "CRC file should contain exactly one JSON object (and therefore one batch)",
-        ))?;
-
-        let mut visitor = CrcProtocolMetadataVisitor::default();
-        visitor.visit_rows_of(crc_batch?.as_ref())?;
-        // note that if protocol/metadata are missing the visitor we return an error here
-        Ok(Self {
-            protocol: visitor
-                .protocol
-                .ok_or(Error::generic("Protocol not found in CRC file"))?,
-            metadata: visitor
-                .metadata
-                .ok_or(Error::generic("Metadata not found in CRC file"))?,
-        })
-    }
+    let mut visitor = CrcProtocolMetadataVisitor::default();
+    visitor.visit_rows_of(crc_batch?.as_ref())?;
+    // note that if protocol/metadata are missing the visitor we return an error here
+    Ok((
+        visitor
+            .protocol
+            .ok_or(Error::generic("Protocol not found in CRC file"))?,
+        visitor
+            .metadata
+            .ok_or(Error::generic("Metadata not found in CRC file"))?,
+    ))
 }
 
 /// For now we just define a visitor for Protocol and Metadata in CRC files since (for now) that's
@@ -187,7 +182,6 @@ mod tests {
     use crate::table_features::{ReaderFeature, WriterFeature};
     use crate::utils::test_utils::string_array_to_engine_data;
     use crate::Engine;
-    use test_utils::DefaultEngineExtension;
 
     use url::Url;
 
@@ -360,7 +354,7 @@ mod tests {
 
         let url = "memory:///00000000000000000001.crc";
         let file = FileMeta::new(Url::parse(url).unwrap(), 0, 0);
-        let pm = ProtocolMetadata::try_from_crc(file, engine.as_ref()).unwrap();
+        let (protocol, metadata) = try_protocol_metadata_from_crc(file, engine.as_ref()).unwrap();
 
         let expected_protocol = Protocol {
             min_reader_version: 3,
@@ -384,8 +378,8 @@ mod tests {
             ]),
         };
 
-        assert_eq!(pm.protocol, expected_protocol);
-        assert_eq!(pm.metadata, expected_metadata);
+        assert_eq!(protocol, expected_protocol);
+        assert_eq!(metadata, expected_metadata);
     }
 
     #[tokio::test]
@@ -416,7 +410,7 @@ mod tests {
 
         let url = "memory:///00000000000000000001.crc";
         let file = FileMeta::new(Url::parse(url).unwrap(), 0, 0);
-        let res = ProtocolMetadata::try_from_crc(file, engine.as_ref());
+        let res = try_protocol_metadata_from_crc(file, engine.as_ref());
 
         // TODO: should check the actual error - this currently errors like
         // "Arrow(JsonError("whilst decoding field 'metadata': expected { got null"))"
