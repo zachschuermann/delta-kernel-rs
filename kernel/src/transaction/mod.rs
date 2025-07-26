@@ -232,9 +232,11 @@ impl Transaction {
     /// add/append/insert data (files) to the table. Note that this API can be called multiple times
     /// to add multiple batches.
     ///
-    /// The expected schema for `add_metadata` is given by [`add_files_schema`].
-    pub fn add_files(&mut self, add_metadata: Box<dyn EngineData>) {
-        self.add_files_metadata.push(add_metadata);
+    /// The expected schema for `add_files` is given by [`add_files_schema`].
+    ///
+    /// [`add_files_schema`]: WriteContext::add_files_schema
+    pub fn add_files(&mut self, add_files: Box<dyn EngineData>) {
+        self.add_files_metadata.push(add_files);
     }
 
     // convert add_files_metadata into add actions using an expression to transform the data in a single
