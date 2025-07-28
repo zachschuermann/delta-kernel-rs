@@ -873,7 +873,7 @@ pub trait SchemaTransform<'a> {
         self.transform(etype)
     }
 
-    /// Called for each variant values encountered. By default, recurses into the fields of the
+    /// Called for each variant value encountered. By default, recurses into the fields of the
     /// variant struct type.
     fn transform_variant(&mut self, stype: &'a StructType) -> Option<Cow<'a, StructType>> {
         self.recurse_into_struct(stype)
