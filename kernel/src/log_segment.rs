@@ -29,6 +29,9 @@ use url::Url;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod crc_tests;
+
 /// A [`LogSegment`] represents a contiguous section of the log and is made of checkpoint files
 /// and commit files and guarantees the following:
 ///     1. Commit file versions will not have any gaps between them.
