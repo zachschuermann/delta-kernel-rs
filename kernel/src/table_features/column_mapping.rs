@@ -160,7 +160,7 @@ impl<'a> SchemaTransform<'a> for ValidateColumnMappings<'a> {
     fn transform_variant(&mut self, _: &'a StructType) -> Option<Cow<'a, StructType>> {
         // don't recurse into variant's fields, as they are not expected to have column mapping
         // annotations
-        // TODO: this changes with icebergcompat right?
+        // TODO: this changes with icebergcompat right? see issue#1125 for icebergcompat.
         None
     }
 }
