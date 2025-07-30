@@ -65,6 +65,9 @@ impl EnsureDataTypes {
             (DataType::Primitive(_), _) if arrow_type.is_primitive() => {
                 check_cast_compat(kernel_type.try_into_arrow()?, arrow_type)
             }
+            (&DataType::Variant(_), _) => {
+                check_cast_compat(kernel_type.try_into_arrow()?, arrow_type)
+            }
             // strings, bools, and binary  aren't primitive in arrow
             (&DataType::BOOLEAN, ArrowDataType::Boolean)
             | (&DataType::STRING, ArrowDataType::Utf8)
@@ -121,15 +124,13 @@ impl EnsureDataTypes {
                         .take(5)
                         .join(", ");
                     make_arrow_error(format!(
-                        "Missing Struct fields {} (Up to five missing fields shown)",
-                        missing_field_names
+                        "Missing Struct fields {missing_field_names} (Up to five missing fields shown)"
                     ))
                 });
                 Ok(DataTypeCompat::Nested)
             }
             _ => Err(make_arrow_error(format!(
-                "Incorrect datatype. Expected {}, got {}",
-                kernel_type, arrow_type
+                "Incorrect datatype. Expected {kernel_type}, got {arrow_type}"
             ))),
         }
     }
@@ -144,8 +145,7 @@ impl EnsureDataTypes {
             && kernel_field_is_nullable != arrow_field_is_nullable
         {
             Err(Error::Generic(format!(
-                "{desc} has nullablily {} in kernel and {} in arrow",
-                kernel_field_is_nullable, arrow_field_is_nullable,
+                "{desc} has nullablily {kernel_field_is_nullable} in kernel and {arrow_field_is_nullable} in arrow",
             )))
         } else {
             Ok(())
@@ -200,8 +200,7 @@ fn check_cast_compat(
         }
         (Date32, Timestamp(_, None)) => Ok(DataTypeCompat::NeedsCast(target_type)),
         _ => Err(make_arrow_error(format!(
-            "Incorrect datatype. Expected {}, got {}",
-            target_type, source_type
+            "Incorrect datatype. Expected {target_type}, got {source_type}"
         ))),
     }
 }
@@ -260,6 +259,7 @@ mod tests {
     use crate::arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Fields};
 
     use crate::engine::arrow_conversion::TryFromKernel as _;
+    use crate::engine::arrow_data::unshredded_variant_arrow_type;
     use crate::schema::{ArrayType, DataType, MapType, StructField};
 
     use super::*;
@@ -322,15 +322,38 @@ mod tests {
     }
 
     #[test]
+    fn ensure_variants() {
+        fn incorrect_variant_arrow_type() -> ArrowDataType {
+            let metadata_field = ArrowField::new("field_1", ArrowDataType::Binary, true);
+            let value_field = ArrowField::new("field_2", ArrowDataType::Binary, true);
+            let fields = vec![metadata_field, value_field];
+            ArrowDataType::Struct(fields.into())
+        }
+
+        assert!(ensure_data_types(
+            &DataType::unshredded_variant(),
+            &unshredded_variant_arrow_type(),
+            true
+        )
+        .is_ok());
+        assert!(ensure_data_types(
+            &DataType::unshredded_variant(),
+            &incorrect_variant_arrow_type(),
+            true
+        )
+        .is_err());
+    }
+
+    #[test]
     fn ensure_decimals() {
         assert!(ensure_data_types(
-            &DataType::decimal_unchecked(5, 2),
+            &DataType::decimal(5, 2).unwrap(),
             &ArrowDataType::Decimal128(5, 2),
             false
         )
         .is_ok());
         assert!(ensure_data_types(
-            &DataType::decimal_unchecked(5, 2),
+            &DataType::decimal(5, 2).unwrap(),
             &ArrowDataType::Decimal128(5, 3),
             false
         )
