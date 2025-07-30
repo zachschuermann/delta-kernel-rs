@@ -9,7 +9,6 @@ use crate::path::ParsedLogPath;
 use crate::scan::state::DvInfo;
 use crate::scan::PhysicalPredicate;
 use crate::schema::{DataType, StructField, StructType};
-use crate::table_changes::log_replay::LogReplayScanner;
 use crate::table_features::ReaderFeature;
 use crate::utils::test_utils::{Action, LocalMockTable};
 use crate::Predicate;
@@ -89,7 +88,8 @@ async fn metadata_protocol() {
     let scan_batches =
         table_changes_action_iter(engine, commits, get_schema().into(), None).unwrap();
     let sv = result_to_sv(scan_batches);
-    assert_eq!(sv, &[false, false]);
+    // When no actions are selected, the batch is filtered out
+    assert!(sv.is_empty());
 }
 #[tokio::test]
 async fn cdf_not_enabled() {
@@ -111,10 +111,7 @@ async fn cdf_not_enabled() {
         .unwrap()
         .into_iter();
 
-    let res: DeltaResult<Vec<_>> =
-        table_changes_action_iter(engine, commits, get_schema().into(), None)
-            .unwrap()
-            .try_collect();
+    let res = table_changes_action_iter(engine, commits, get_schema().into(), None);
 
     assert!(matches!(res, Err(Error::ChangeDataFeedUnsupported(_))));
 }
@@ -139,10 +136,7 @@ async fn unsupported_reader_feature() {
         .unwrap()
         .into_iter();
 
-    let res: DeltaResult<Vec<_>> =
-        table_changes_action_iter(engine, commits, get_schema().into(), None)
-            .unwrap()
-            .try_collect();
+    let res = table_changes_action_iter(engine, commits, get_schema().into(), None);
 
     assert!(matches!(res, Err(Error::ChangeDataFeedUnsupported(_))));
 }
@@ -170,10 +164,7 @@ async fn column_mapping_should_fail() {
         .unwrap()
         .into_iter();
 
-    let res: DeltaResult<Vec<_>> =
-        table_changes_action_iter(engine, commits, get_schema().into(), None)
-            .unwrap()
-            .try_collect();
+    let res = table_changes_action_iter(engine, commits, get_schema().into(), None);
 
     assert!(matches!(res, Err(Error::ChangeDataFeedUnsupported(_))));
 }
@@ -201,10 +192,7 @@ async fn incompatible_schemas_fail() {
             .unwrap()
             .into_iter();
 
-        let res: DeltaResult<Vec<_>> =
-            table_changes_action_iter(engine, commits, cdf_schema.into(), None)
-                .unwrap()
-                .try_collect();
+        let res = table_changes_action_iter(engine, commits, cdf_schema.into(), None);
 
         assert!(matches!(
             res,
@@ -341,16 +329,14 @@ async fn filter_data_change() {
         .unwrap()
         .into_iter();
 
-    let sv = table_changes_action_iter(engine, commits, get_schema().into(), None)
+    let results: Vec<_> = table_changes_action_iter(engine, commits, get_schema().into(), None)
         .unwrap()
-        .flat_map(|scan_metadata| {
-            let scan_metadata = scan_metadata.unwrap();
-            assert_eq!(scan_metadata.remove_dvs, HashMap::new().into());
-            scan_metadata.selection_vector
-        })
-        .collect_vec();
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
 
-    assert_eq!(sv, &[false; 5]);
+    // All actions have data_change=false, so they should all be filtered out
+    // The LogReplayProcessor filters out batches with no selected rows
+    assert!(results.is_empty());
 }
 
 #[tokio::test]
@@ -575,33 +561,8 @@ async fn failing_protocol() {
         .unwrap()
         .into_iter();
 
-    let res: DeltaResult<Vec<_>> =
-        table_changes_action_iter(engine, commits, get_schema().into(), None)
-            .unwrap()
-            .try_collect();
+    let res = table_changes_action_iter(engine, commits, get_schema().into(), None);
 
     assert!(res.is_err());
 }
 
-#[tokio::test]
-async fn file_meta_timestamp() {
-    let engine = Arc::new(SyncEngine::new());
-    let mut mock_table = LocalMockTable::new();
-
-    mock_table
-        .commit([Action::Add(Add {
-            path: "fake_path_1".into(),
-            data_change: true,
-            ..Default::default()
-        })])
-        .await;
-
-    let mut commits = get_segment(engine.as_ref(), mock_table.table_root(), 0, None)
-        .unwrap()
-        .into_iter();
-
-    let commit = commits.next().unwrap();
-    let file_meta_ts = commit.location.last_modified;
-    let scanner = LogReplayScanner::try_new(engine.as_ref(), commit, &get_schema().into()).unwrap();
-    assert_eq!(scanner.timestamp, file_meta_ts);
-}
