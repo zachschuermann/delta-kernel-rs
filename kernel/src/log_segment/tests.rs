@@ -4,6 +4,7 @@ use std::{path::PathBuf, sync::Arc};
 use crate::object_store::{memory::InMemory, path::Path, ObjectStore};
 use futures::executor::block_on;
 use itertools::Itertools;
+use serde_json;
 use test_log::test;
 use url::Url;
 

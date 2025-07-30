@@ -467,24 +467,22 @@ impl LogSegment {
         //    b) if we don't have a CRC, or have a CRC older than most recent checkpoint, we proceed
         //       as normal (full log segment).
         //
-        // TODO: leverage log compaction files
-        let protocol_metadata_log_segment: Cow<'_, Self> =
-            if let Some(latest_crc_file) = &self.latest_crc_file {
-                if latest_crc_file.version >= self.checkpoint_version.unwrap_or(0) {
-                    let mut log_segment = self.clone();
-                    log_segment.checkpoint_version = None;
-                    log_segment.checkpoint_parts.clear();
-                    // only keep commits from CRC_version + 1 to target version
-                    log_segment
-                        .ascending_commit_files
-                        .retain(|commit| commit.version > latest_crc_file.version);
-                    Cow::Owned(log_segment)
-                } else {
-                    Cow::Borrowed(self)
-                }
-            } else {
-                Cow::Borrowed(self)
-            };
+        // TODO: leverage log compaction files?
+        let protocol_metadata_log_segment: Cow<'_, Self> = match &self.latest_crc_file {
+            Some(latest_crc_file)
+                if latest_crc_file.version >= self.checkpoint_version.unwrap_or(0) =>
+            {
+                let mut log_segment = self.clone();
+                log_segment.checkpoint_version = None;
+                log_segment.checkpoint_parts.clear();
+                // only keep commits from CRC_version + 1 to target version
+                log_segment
+                    .ascending_commit_files
+                    .retain(|commit| commit.version > latest_crc_file.version);
+                Cow::Owned(log_segment)
+            }
+            _ => Cow::Borrowed(self),
+        };
 
         // 3. do log replay
         let actions_batches = protocol_metadata_log_segment.replay_for_metadata(engine)?;

@@ -1,105 +1,122 @@
 use std::sync::Arc;
+use std::collections::HashMap;
 
 use crate::engine::default::executor::tokio::TokioBackgroundExecutor;
-use crate::engine::default::filesystem::ObjectStoreStorageHandler;
 use crate::engine::default::DefaultEngine;
-use crate::log_segment::{LogPathFileType, LogSegment, ParsedLogPath};
+use crate::log_segment::{ListedLogFiles, LogSegment, LogPathFileType, ParsedLogPath};
 use crate::object_store::{memory::InMemory, path::Path, ObjectStore};
-use crate::{DeltaResult, FileMeta, Version};
-use futures::executor::block_on;
-use serde_json::json;
+use crate::utils::test_utils::Action;
+use crate::actions::{Metadata, Protocol, Format};
+use crate::table_features::{ReaderFeature, WriterFeature};
+use crate::{DeltaResult, FileMeta};
+use serde_json;
 use url::Url;
 
-
-// Helper to create a new in-memory store
-fn new_in_memory_store() -> (Arc<dyn ObjectStore>, Url) {
-    let store = Arc::new(InMemory::new());
-    let log_root = Url::parse("memory:///_delta_log/").unwrap();
-    (store, log_root)
+// Helper function to create log paths (copied from tests.rs since it's private)
+fn create_log_path(path: &str) -> ParsedLogPath<FileMeta> {
+    ParsedLogPath::try_from(FileMeta {
+        location: Url::parse(path).expect("Invalid file URL"),
+        last_modified: 0,
+        size: 0,
+    })
+    .unwrap()
+    .unwrap()
 }
 
-// Helper to build a commit log path
-fn commit_log_path(log_root: &Url, version: Version, extension: Option<&str>) -> DeltaResult<Url> {
-    let filename = match extension {
-        Some(ext) => format!("{:020}.{}", version, ext),
-        None => format!("{:020}.json", version),
-    };
-    Ok(log_root.join(&filename)?)
-}
-
-// Helper to create a LogSegment with CRC file
-fn create_log_segment_with_crc(
-    log_root: Url,
-    checkpoint_version: Option<Version>,
-    crc_version: Version,
-    end_version: Version,
-    commit_versions: Vec<Version>,
-) -> LogSegment {
-    let crc_path = ParsedLogPath {
-        version: crc_version,
-        file_type: LogPathFileType::Crc,
-        location: FileMeta::new(
-            commit_log_path(&log_root, crc_version, Some("crc")).unwrap(),
-            0, // last_modified
-            0, // size
-        ),
-        filename: format!("{:020}.crc", crc_version),
-        extension: "crc".to_string(),
-    };
-
-    let commit_files: Vec<ParsedLogPath> = commit_versions
+// Helper function to write checkpoint with Protocol and Metadata actions
+async fn write_checkpoint_to_store(
+    store: &Arc<InMemory>,
+    filename: &str,
+    metadata: Metadata,
+    protocol: Protocol,
+) -> DeltaResult<()> {
+    let actions = vec![Action::Metadata(metadata), Action::Protocol(protocol)];
+    let json_lines: Vec<String> = actions
         .iter()
-        .map(|&v| ParsedLogPath {
-            version: v,
-            file_type: LogPathFileType::Commit,
-            location: FileMeta::new(
-                commit_log_path(&log_root, v, Some("json")).unwrap(),
-                0, // last_modified
-                0, // size
-            ),
-            filename: format!("{:020}.json", v),
-            extension: "json".to_string(),
-        })
+        .map(|action| serde_json::to_string(action).unwrap())
         .collect();
-
-    LogSegment {
-        log_root,
-        checkpoint_version,
-        checkpoint_parts: vec![],
-        latest_crc_file: Some(crc_path),
-        ascending_commit_files: commit_files,
-        ascending_compaction_files: vec![],
-        end_version,
-    }
+    let content = json_lines.join("\n");
+    let checkpoint_path = format!("_delta_log/{}", filename);
+    store
+        .put(&Path::from(checkpoint_path), content.into())
+        .await?;
+    Ok(())
 }
 
-#[test]
-fn test_protocol_metadata_with_crc_at_target_version() -> DeltaResult<()> {
-    // Test case 1: CRC file exists at the exact target version
+// CRC Protocol and Metadata replay tests
+
+#[tokio::test]
+async fn test_protocol_metadata_with_crc_at_target_version() -> DeltaResult<()> {
+    // Test case: CRC file exists at the exact target version
     // Should return P+M directly from CRC without replay
-    let (store, log_root) = new_in_memory_store();
+    let store = Arc::new(InMemory::new());
     let engine = DefaultEngine::new(store.clone(), Arc::new(TokioBackgroundExecutor::new()));
 
-    // Create a CRC file with P+M at version 5
-    let crc_content = create_crc_with_pm(5);
-    let crc_path = commit_log_path(&log_root, 5, Some("crc"))?;
-    block_on(async {
-        store.put(&Path::from(crc_path.as_str()), crc_content.into()).await
-    })?;
+    // Create CRC file with protocol and metadata at version 5
+    let crc_content = serde_json::json!({
+        "tableSizeBytes": 1000,
+        "numFiles": 10,
+        "numMetadata": 1,
+        "numProtocol": 1,
+        "metadata": {
+            "id": "test-table-5",
+            "format": {
+                "provider": "parquet",
+                "options": {}
+            },
+            "schemaString": r#"{"type":"struct","fields":[{"name":"value","type":"integer","nullable":true,"metadata":{}}]}"#,
+            "partitionColumns": [],
+            "configuration": {},
+            "createdTime": 1677811175
+        },
+        "protocol": {
+            "minReaderVersion": 3,
+            "minWriterVersion": 7,
+            "readerFeatures": ["columnMapping"],
+            "writerFeatures": ["columnMapping"]
+        }
+    }).to_string();
 
-    // Create test data: CRC at version 5, reading version 5
-    let log_segment =
-        create_log_segment_with_crc(log_root.clone(), None, 5, 5, vec![0, 1, 2, 3, 4, 5]);
+    store
+        .put(
+            &Path::from("_delta_log/00000000000000000005.crc"),
+            crc_content.into(),
+        )
+        .await?;
+
+    // Create LogSegment with CRC at version 5, reading version 5
+    let log_root = Url::parse("memory:///_delta_log/").unwrap();
+    let listed_files = ListedLogFiles::new(
+        vec![
+            // Need at least one commit file for LogSegment to be valid
+            create_log_path("file:///_delta_log/00000000000000000005.json"),
+        ],
+        vec![],
+        vec![],
+        Some(ParsedLogPath {
+            version: 5,
+            file_type: LogPathFileType::Crc,
+            location: FileMeta::new(
+                Url::parse("memory:///_delta_log/00000000000000000005.crc").unwrap(),
+                0,
+                0,
+            ),
+            filename: "00000000000000000005.crc".to_string(),
+            extension: "crc".to_string(),
+        }),
+    );
+
+    let log_segment = LogSegment::try_new(listed_files, log_root, Some(5))?;
 
     // Call protocol_and_metadata - should return P+M directly from CRC
     let (metadata, protocol) = log_segment.protocol_and_metadata(&engine)?;
-    
+
     assert!(metadata.is_some());
     assert!(protocol.is_some());
-    
+
     let metadata = metadata.unwrap();
     assert_eq!(metadata.id, "test-table-5");
-    
+
     let protocol = protocol.unwrap();
     assert_eq!(protocol.min_reader_version(), 3);
     assert_eq!(protocol.min_writer_version(), 7);
@@ -107,44 +124,150 @@ fn test_protocol_metadata_with_crc_at_target_version() -> DeltaResult<()> {
     Ok(())
 }
 
-#[test]
-fn test_protocol_metadata_with_crc_newer_than_checkpoint() -> DeltaResult<()> {
-    // Test case 2: CRC file is newer than checkpoint
+#[tokio::test]
+async fn test_protocol_metadata_with_crc_newer_than_checkpoint() -> DeltaResult<()> {
+    // Test case: CRC file is newer than checkpoint
     // Should create pruned log segment starting from CRC version + 1
-    let (store, log_root) = new_in_memory_store();
+    let store = Arc::new(InMemory::new());
     let engine = DefaultEngine::new(store.clone(), Arc::new(TokioBackgroundExecutor::new()));
 
     // Create CRC file at version 5
-    let crc_content = create_crc_with_pm(5);
-    let crc_path = commit_log_path(&log_root, 5, Some("crc"))?;
-    block_on(async {
-        store.put(&Path::from(crc_path.as_str()), crc_content.into()).await
-    })?;
-    
-    // Create checkpoint at version 3 (older than CRC)
-    create_checkpoint(&store, &log_root, 3)?;
-    
-    // Create commits with P+M at version 7
-    create_commit_with_pm(&store, &log_root, 7)?;
+    let crc_content = serde_json::json!({
+        "tableSizeBytes": 1000,
+        "numFiles": 10,
+        "numMetadata": 1,
+        "numProtocol": 1,
+        "metadata": {
+            "id": "test-table-5",
+            "format": {
+                "provider": "parquet",
+                "options": {}
+            },
+            "schemaString": r#"{"type":"struct","fields":[{"name":"value","type":"integer","nullable":true,"metadata":{}}]}"#,
+            "partitionColumns": [],
+            "configuration": {},
+            "createdTime": 1677811175
+        },
+        "protocol": {
+            "minReaderVersion": 3,
+            "minWriterVersion": 7,
+            "readerFeatures": ["columnMapping"],
+            "writerFeatures": ["columnMapping"]
+        }
+    }).to_string();
 
-    // Create test data: checkpoint at v3, CRC at v5, reading v8
-    let log_segment = create_log_segment_with_crc(
-        log_root.clone(),
-        Some(3),
-        5,
-        8,
-        vec![0, 1, 2, 3, 4, 5, 6, 7, 8],
+    store
+        .put(
+            &Path::from("_delta_log/00000000000000000005.crc"),
+            crc_content.into(),
+        )
+        .await?;
+
+    // Create commit at version 7 with new metadata
+    let metadata_7 = Metadata {
+        id: "test-table-7".to_string(),
+        name: None,
+        description: None,
+        format: Format {
+            provider: "parquet".to_string(),
+            options: HashMap::new(),
+        },
+        schema_string: r#"{"type":"struct","fields":[{"name":"value","type":"integer","nullable":true,"metadata":{}}]}"#.to_string(),
+        partition_columns: vec![],
+        created_time: Some(1677811175),
+        configuration: HashMap::new(),
+    };
+
+    let protocol_7 = Protocol::try_new(
+        3,
+        7,
+        Some(vec![ReaderFeature::ColumnMapping]),
+        Some(vec![WriterFeature::ColumnMapping]),
+    )?;
+
+    let actions_7 = vec![Action::Metadata(metadata_7), Action::Protocol(protocol_7)];
+    let json_lines_7: Vec<String> = actions_7
+        .iter()
+        .map(|action| serde_json::to_string(action).unwrap())
+        .collect();
+    let commit_7_content = json_lines_7.join("\n");
+
+    store
+        .put(
+            &Path::from("_delta_log/00000000000000000007.json"),
+            commit_7_content.into(),
+        )
+        .await?;
+
+    // Create commit at version 6 (empty commit)
+    let commit_6_content = serde_json::json!({
+        "add": {
+            "path": "file-6.parquet",
+            "size": 1000,
+            "modificationTime": 1677811175,
+            "dataChange": true
+        }
+    })
+    .to_string();
+
+    store
+        .put(
+            &Path::from("_delta_log/00000000000000000006.json"),
+            commit_6_content.into(),
+        )
+        .await?;
+
+    // Create commit at version 8 (empty commit)
+    let commit_8_content = serde_json::json!({
+        "add": {
+            "path": "file-8.parquet",
+            "size": 1000,
+            "modificationTime": 1677811175,
+            "dataChange": true
+        }
+    })
+    .to_string();
+
+    store
+        .put(
+            &Path::from("_delta_log/00000000000000000008.json"),
+            commit_8_content.into(),
+        )
+        .await?;
+
+    // Create LogSegment with checkpoint at v3, CRC at v5, reading v8
+    let log_root = Url::parse("memory:///_delta_log/").unwrap();
+    let listed_files = ListedLogFiles::new(
+        vec![
+            // Commits 6, 7, 8 (only these should be used in replay)
+            create_log_path("file:///_delta_log/00000000000000000006.json"),
+            create_log_path("file:///_delta_log/00000000000000000007.json"),
+            create_log_path("file:///_delta_log/00000000000000000008.json"),
+        ],
+        vec![],
+        vec![],
+        Some(ParsedLogPath {
+            version: 5,
+            file_type: LogPathFileType::Crc,
+            location: FileMeta::new(
+                Url::parse("memory:///_delta_log/00000000000000000005.crc").unwrap(),
+                0,
+                0,
+            ),
+            filename: "00000000000000000005.crc".to_string(),
+            extension: "crc".to_string(),
+        }),
     );
 
-    // When we call protocol_and_metadata, it should:
-    // 1. Create a pruned segment with only commits 6, 7, 8
-    // 2. Clear checkpoint data
-    // 3. Find P+M from commit 7
+    let mut log_segment = LogSegment::try_new(listed_files, log_root, Some(8))?;
+    log_segment.checkpoint_version = Some(3); // Set checkpoint version
+
+    // Call protocol_and_metadata - should use pruned segment and find P+M from commit 7
     let (metadata, protocol) = log_segment.protocol_and_metadata(&engine)?;
-    
+
     assert!(metadata.is_some());
     assert!(protocol.is_some());
-    
+
     // Should get P+M from commit 7, not from CRC
     let metadata = metadata.unwrap();
     assert_eq!(metadata.id, "test-table-7");
@@ -152,111 +275,95 @@ fn test_protocol_metadata_with_crc_newer_than_checkpoint() -> DeltaResult<()> {
     Ok(())
 }
 
-#[test]
-fn test_protocol_metadata_with_crc_older_than_checkpoint() -> DeltaResult<()> {
-    // Test case 3: CRC file is older than checkpoint
-    // Should use normal log segment (full replay from checkpoint)
-    let (store, log_root) = new_in_memory_store();
+#[tokio::test]
+async fn test_protocol_metadata_fallback_to_crc() -> DeltaResult<()> {
+    // Test case: No P+M found in replay, should fallback to CRC
+    let store = Arc::new(InMemory::new());
     let engine = DefaultEngine::new(store.clone(), Arc::new(TokioBackgroundExecutor::new()));
 
-    // Create CRC file at version 2 (older than checkpoint)
-    let crc_content = create_crc_with_pm(2);
-    let crc_path = commit_log_path(&log_root, 2, Some("crc"))?;
-    block_on(async {
-        store.put(&Path::from(crc_path.as_str()), crc_content.into()).await
-    })?;
-    
-    // Create checkpoint with P+M at version 5
-    create_checkpoint_with_pm(&store, &log_root, 5)?;
+    // Create CRC file with P+M at version 5
+    let crc_content = serde_json::json!({
+        "tableSizeBytes": 1000,
+        "numFiles": 10,
+        "numMetadata": 1,
+        "numProtocol": 1,
+        "metadata": {
+            "id": "test-table-5",
+            "format": {
+                "provider": "parquet",
+                "options": {}
+            },
+            "schemaString": r#"{"type":"struct","fields":[{"name":"value","type":"integer","nullable":true,"metadata":{}}]}"#,
+            "partitionColumns": [],
+            "configuration": {},
+            "createdTime": 1677811175
+        },
+        "protocol": {
+            "minReaderVersion": 3,
+            "minWriterVersion": 7,
+            "readerFeatures": ["columnMapping"],
+            "writerFeatures": ["columnMapping"]
+        }
+    }).to_string();
 
-    // Create test data: CRC at v2, checkpoint at v5, reading v8
-    let log_segment = create_log_segment_with_crc(
-        log_root.clone(),
-        Some(5),
-        2,
-        8,
-        vec![0, 1, 2, 3, 4, 5, 6, 7, 8],
-    );
-    
-    // When CRC is older than checkpoint, should use normal replay from checkpoint
-    let (metadata, protocol) = log_segment.protocol_and_metadata(&engine)?;
-    
-    assert!(metadata.is_some());
-    assert!(protocol.is_some());
-    
-    // Should get P+M from checkpoint, not CRC
-    let metadata = metadata.unwrap();
-    assert_eq!(metadata.id, "test-table-5");
+    store
+        .put(
+            &Path::from("_delta_log/00000000000000000005.crc"),
+            crc_content.into(),
+        )
+        .await?;
 
-    Ok(())
-}
-
-#[test]
-fn test_protocol_metadata_no_crc_file() -> DeltaResult<()> {
-    // Test case 4: No CRC file exists
-    // Should use normal log segment
-    let (store, log_root) = new_in_memory_store();
-    let engine = DefaultEngine::new(store.clone(), Arc::new(TokioBackgroundExecutor::new()));
-
-    // Create checkpoint with P+M at version 3
-    create_checkpoint_with_pm(&store, &log_root, 3)?;
-
-    let log_segment = LogSegment {
-        log_root: log_root.clone(),
-        checkpoint_version: Some(3),
-        checkpoint_parts: vec![],
-        latest_crc_file: None,
-        ascending_commit_files: vec![],
-        ascending_compaction_files: vec![],
-        end_version: 5,
-    };
-    
-    // With no CRC file, should use normal replay
-    let (metadata, protocol) = log_segment.protocol_and_metadata(&engine)?;
-    
-    assert!(metadata.is_some());
-    assert!(protocol.is_some());
-    
-    let metadata = metadata.unwrap();
-    assert_eq!(metadata.id, "test-table-3");
-
-    Ok(())
-}
-
-#[test]
-fn test_protocol_metadata_fallback_to_crc_when_no_pm_in_replay() -> DeltaResult<()> {
-    // Test case 5: No P+M found in replay, should fallback to CRC
-    // This tests step 4 of your implementation
-    let (store, log_root) = new_in_memory_store();
-    let engine = DefaultEngine::new(store.clone(), Arc::new(TokioBackgroundExecutor::new()));
-
-    // Create CRC with P+M at version 5
-    let crc_content = create_crc_with_pm(5);
-    let crc_path = commit_log_path(&log_root, 5, Some("crc"))?;
-    block_on(async {
-        store.put(&Path::from(crc_path.as_str()), crc_content.into()).await
-    })?;
-    
-    // Create commits 6, 7, 8 without P+M actions
+    // Create commits 6, 7, 8 without P+M actions (just add actions)
     for v in 6..=8 {
-        create_commit_without_pm(&store, &log_root, v)?;
+        let commit_content = serde_json::json!({
+            "add": {
+                "path": format!("file-{}.parquet", v),
+                "size": 1000,
+                "modificationTime": 1677811175,
+                "dataChange": true
+            }
+        })
+        .to_string();
+
+        store
+            .put(
+                &Path::from(format!("_delta_log/{:020}.json", v).as_str()),
+                commit_content.into(),
+            )
+            .await?;
     }
 
-    // Create scenario where commits after CRC don't contain P+M
-    let log_segment = create_log_segment_with_crc(
-        log_root.clone(),
-        None,
-        5,
-        8,
-        vec![0, 1, 2, 3, 4, 5, 6, 7, 8],
+    // Create LogSegment with CRC at v5, reading v8
+    let log_root = Url::parse("memory:///_delta_log/").unwrap();
+    let listed_files = ListedLogFiles::new(
+        vec![
+            create_log_path("file:///_delta_log/00000000000000000006.json"),
+            create_log_path("file:///_delta_log/00000000000000000007.json"),
+            create_log_path("file:///_delta_log/00000000000000000008.json"),
+        ],
+        vec![],
+        vec![],
+        Some(ParsedLogPath {
+            version: 5,
+            file_type: LogPathFileType::Crc,
+            location: FileMeta::new(
+                Url::parse("memory:///_delta_log/00000000000000000005.crc").unwrap(),
+                0,
+                0,
+            ),
+            filename: "00000000000000000005.crc".to_string(),
+            extension: "crc".to_string(),
+        }),
     );
-    
-    // Should fallback to CRC P+M when replay finds nothing
+
+    let log_segment = LogSegment::try_new(listed_files, log_root, Some(8))?;
+
+    // Call protocol_and_metadata - should fallback to CRC when no P+M in commits
     let (metadata, protocol) = log_segment.protocol_and_metadata(&engine)?;
-    
+
     assert!(metadata.is_some());
     assert!(protocol.is_some());
-    
+
     // Should get P+M from CRC at version 5
     let metadata = metadata.unwrap();
     assert_eq!(metadata.id, "test-table-5");
@@ -264,53 +371,381 @@ fn test_protocol_metadata_fallback_to_crc_when_no_pm_in_replay() -> DeltaResult<
     Ok(())
 }
 
-#[test]
-fn test_protocol_metadata_crc_without_protocol_should_error() -> DeltaResult<()> {
-    // Test case 6: CRC file missing Protocol should error
-    let (store, log_root) = new_in_memory_store();
+#[tokio::test]
+async fn test_protocol_metadata_with_crc_older_than_checkpoint() -> DeltaResult<()> {
+    // Test case: CRC file is older than checkpoint
+    // Should use normal log segment (full replay from checkpoint)
+    let store = Arc::new(InMemory::new());
+    let engine = DefaultEngine::new(store.clone(), Arc::new(TokioBackgroundExecutor::new()));
+
+    // Create CRC file at version 2 (older than checkpoint)
+    let crc_content = serde_json::json!({
+        "tableSizeBytes": 1000,
+        "numFiles": 10,
+        "numMetadata": 1,
+        "numProtocol": 1,
+        "metadata": {
+            "id": "test-table-2",
+            "format": {
+                "provider": "parquet",
+                "options": {}
+            },
+            "schemaString": r#"{"type":"struct","fields":[{"name":"value","type":"integer","nullable":true,"metadata":{}}]}"#,
+            "partitionColumns": [],
+            "configuration": {},
+            "createdTime": 1677811175
+        },
+        "protocol": {
+            "minReaderVersion": 3,
+            "minWriterVersion": 7,
+            "readerFeatures": ["columnMapping"],
+            "writerFeatures": ["columnMapping"]
+        }
+    }).to_string();
+
+    store
+        .put(
+            &Path::from("_delta_log/00000000000000000002.crc"),
+            crc_content.into(),
+        )
+        .await?;
+
+    // Create checkpoint at version 5 with P+M
+    let metadata = Metadata {
+        id: "test-table-5".to_string(),
+        name: None,
+        description: None,
+        format: Format {
+            provider: "parquet".to_string(),
+            options: HashMap::new(),
+        },
+        schema_string: r#"{"type":"struct","fields":[{"name":"value","type":"integer","nullable":true,"metadata":{}}]}"#.to_string(),
+        partition_columns: vec![],
+        created_time: Some(1677811175),
+        configuration: HashMap::new(),
+    };
+
+    let protocol = Protocol::try_new(
+        3,
+        7,
+        Some(vec![ReaderFeature::ColumnMapping]),
+        Some(vec![WriterFeature::ColumnMapping]),
+    )?;
+
+    write_checkpoint_to_store(&store, "00000000000000000005.checkpoint.json", metadata, protocol).await?;
+
+    // Create commits for versions 6, 7, 8
+    for v in 6..=8 {
+        let commit_content = serde_json::json!({
+            "add": {
+                "path": format!("file-{}.parquet", v),
+                "size": 1000,
+                "modificationTime": 1677811175,
+                "dataChange": true
+            }
+        })
+        .to_string();
+        store
+            .put(
+                &Path::from(format!("_delta_log/{:020}.json", v).as_str()),
+                commit_content.into(),
+            )
+            .await?;
+    }
+
+    // Create LogSegment with CRC at v2, checkpoint at v5, reading v8
+    let log_root = Url::parse("memory:///_delta_log/").unwrap();
+    let listed_files = ListedLogFiles::new(
+        vec![
+            create_log_path("file:///_delta_log/00000000000000000006.json"),
+            create_log_path("file:///_delta_log/00000000000000000007.json"),
+            create_log_path("file:///_delta_log/00000000000000000008.json"),
+        ],
+        vec![],
+        vec![ParsedLogPath {
+            version: 5,
+            file_type: LogPathFileType::SinglePartCheckpoint,
+            location: FileMeta::new(
+                Url::parse("memory:///_delta_log/00000000000000000005.checkpoint.json").unwrap(),
+                0,
+                0,
+            ),
+            filename: "00000000000000000005.checkpoint.json".to_string(),
+            extension: "json".to_string(),
+        }],
+        Some(ParsedLogPath {
+            version: 2,
+            file_type: LogPathFileType::Crc,
+            location: FileMeta::new(
+                Url::parse("memory:///_delta_log/00000000000000000002.crc").unwrap(),
+                0,
+                0,
+            ),
+            filename: "00000000000000000002.crc".to_string(),
+            extension: "crc".to_string(),
+        }),
+    );
+
+    let mut log_segment = LogSegment::try_new(listed_files, log_root, Some(8))?;
+    log_segment.checkpoint_version = Some(5);
+
+    // When CRC is older than checkpoint, should use normal replay from checkpoint
+    let (metadata, protocol) = log_segment.protocol_and_metadata(&engine)?;
+
+    assert!(metadata.is_some());
+    assert!(protocol.is_some());
+
+    // Should get P+M from checkpoint, not CRC
+    let metadata = metadata.unwrap();
+    assert_eq!(metadata.id, "test-table-5");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_protocol_metadata_no_crc_file() -> DeltaResult<()> {
+    // Test case: No CRC file exists
+    // Should use normal log segment replay
+    let store = Arc::new(InMemory::new());
+    let engine = DefaultEngine::new(store.clone(), Arc::new(TokioBackgroundExecutor::new()));
+
+    // Create checkpoint at version 3 with P+M
+    let metadata = Metadata {
+        id: "test-table-3".to_string(),
+        name: None,
+        description: None,
+        format: Format {
+            provider: "parquet".to_string(),
+            options: HashMap::new(),
+        },
+        schema_string: r#"{"type":"struct","fields":[{"name":"value","type":"integer","nullable":true,"metadata":{}}]}"#.to_string(),
+        partition_columns: vec![],
+        created_time: Some(1677811175),
+        configuration: HashMap::new(),
+    };
+
+    let protocol = Protocol::try_new(
+        3,
+        7,
+        Some(vec![ReaderFeature::ColumnMapping]),
+        Some(vec![WriterFeature::ColumnMapping]),
+    )?;
+
+    write_checkpoint_to_store(&store, "00000000000000000003.checkpoint.json", metadata, protocol).await?;
+
+    // Create commits 4 and 5
+    for v in 4..=5 {
+        let commit_content = serde_json::json!({
+            "add": {
+                "path": format!("file-{}.parquet", v),
+                "size": 1000,
+                "modificationTime": 1677811175,
+                "dataChange": true
+            }
+        })
+        .to_string();
+        store
+            .put(
+                &Path::from(format!("_delta_log/{:020}.json", v).as_str()),
+                commit_content.into(),
+            )
+            .await?;
+    }
+
+    // Create LogSegment with no CRC file
+    let log_root = Url::parse("memory:///_delta_log/").unwrap();
+    let listed_files = ListedLogFiles::new(
+        vec![
+            create_log_path("file:///_delta_log/00000000000000000004.json"),
+            create_log_path("file:///_delta_log/00000000000000000005.json"),
+        ],
+        vec![],
+        vec![ParsedLogPath {
+            version: 3,
+            file_type: LogPathFileType::SinglePartCheckpoint,
+            location: FileMeta::new(
+                Url::parse("memory:///_delta_log/00000000000000000003.checkpoint.json").unwrap(),
+                0,
+                0,
+            ),
+            filename: "00000000000000000003.checkpoint.json".to_string(),
+            extension: "json".to_string(),
+        }],
+        None, // No CRC file
+    );
+
+    let mut log_segment = LogSegment::try_new(listed_files, log_root, Some(5))?;
+    log_segment.checkpoint_version = Some(3);
+
+    // With no CRC file, should use normal replay
+    let (metadata, protocol) = log_segment.protocol_and_metadata(&engine)?;
+
+    assert!(metadata.is_some());
+    assert!(protocol.is_some());
+
+    let metadata = metadata.unwrap();
+    assert_eq!(metadata.id, "test-table-3");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_protocol_metadata_crc_without_protocol_should_error() -> DeltaResult<()> {
+    // Test case: CRC file missing Protocol should error
+    let store = Arc::new(InMemory::new());
     let engine = DefaultEngine::new(store.clone(), Arc::new(TokioBackgroundExecutor::new()));
 
     // Create CRC without protocol field
-    let crc_content = create_crc_without_protocol(5);
-    let crc_path = commit_log_path(&log_root, 5, Some("crc"))?;
-    block_on(async {
-        store.put(&Path::from(crc_path.as_str()), crc_content.into()).await
-    })?;
-    
-    let log_segment = create_log_segment_with_crc(log_root.clone(), None, 5, 5, vec![5]);
-    
+    let crc_content = serde_json::json!({
+        "tableSizeBytes": 1000,
+        "numFiles": 10,
+        "numMetadata": 1,
+        "numProtocol": 0,
+        "metadata": {
+            "id": "test-table-5",
+            "format": {
+                "provider": "parquet",
+                "options": {}
+            },
+            "schemaString": r#"{"type":"struct","fields":[{"name":"value","type":"integer","nullable":true,"metadata":{}}]}"#,
+            "partitionColumns": [],
+            "configuration": {},
+            "createdTime": 1677811175
+        }
+    }).to_string();
+
+    store
+        .put(
+            &Path::from("_delta_log/00000000000000000005.crc"),
+            crc_content.into(),
+        )
+        .await?;
+
+    // Create a dummy commit file
+    let commit_content = serde_json::json!({
+        "add": {
+            "path": "file-5.parquet",
+            "size": 1000,
+            "modificationTime": 1677811175,
+            "dataChange": true
+        }
+    })
+    .to_string();
+    store
+        .put(
+            &Path::from("_delta_log/00000000000000000005.json"),
+            commit_content.into(),
+        )
+        .await?;
+
+    let log_root = Url::parse("memory:///_delta_log/").unwrap();
+    let listed_files = ListedLogFiles::new(
+        vec![create_log_path(
+            "file:///_delta_log/00000000000000000005.json",
+        )],
+        vec![],
+        vec![],
+        Some(ParsedLogPath {
+            version: 5,
+            file_type: LogPathFileType::Crc,
+            location: FileMeta::new(
+                Url::parse("memory:///_delta_log/00000000000000000005.crc").unwrap(),
+                0,
+                0,
+            ),
+            filename: "00000000000000000005.crc".to_string(),
+            extension: "crc".to_string(),
+        }),
+    );
+
+    let log_segment = LogSegment::try_new(listed_files, log_root, Some(5))?;
+
     // Should error when CRC is missing protocol
     let result = log_segment.protocol_and_metadata(&engine);
     assert!(result.is_err());
-    
+
     if let Err(e) = result {
-        assert!(e.to_string().contains("Protocol") || e.to_string().contains("protocol"));
+        // Current implementation returns JSON parsing error rather than specific message
+        assert!(e.to_string().contains("whilst decoding field 'protocol'"));
     }
 
     Ok(())
 }
 
-#[test]
-fn test_protocol_metadata_crc_without_metadata_should_error() -> DeltaResult<()> {
-    // Test case 7: CRC file missing Metadata should error
-    let (store, log_root) = new_in_memory_store();
+#[tokio::test]
+async fn test_protocol_metadata_crc_without_metadata_should_error() -> DeltaResult<()> {
+    // Test case: CRC file missing Metadata should error
+    let store = Arc::new(InMemory::new());
     let engine = DefaultEngine::new(store.clone(), Arc::new(TokioBackgroundExecutor::new()));
 
     // Create CRC without metadata field
-    let crc_content = create_crc_without_metadata(5);
-    let crc_path = commit_log_path(&log_root, 5, Some("crc"))?;
-    block_on(async {
-        store.put(&Path::from(crc_path.as_str()), crc_content.into()).await
-    })?;
-    
-    let log_segment = create_log_segment_with_crc(log_root.clone(), None, 5, 5, vec![5]);
-    
+    let crc_content = serde_json::json!({
+        "tableSizeBytes": 1000,
+        "numFiles": 10,
+        "numMetadata": 0,
+        "numProtocol": 1,
+        "protocol": {
+            "minReaderVersion": 3,
+            "minWriterVersion": 7,
+            "readerFeatures": ["columnMapping"],
+            "writerFeatures": ["columnMapping"]
+        }
+    })
+    .to_string();
+
+    store
+        .put(
+            &Path::from("_delta_log/00000000000000000005.crc"),
+            crc_content.into(),
+        )
+        .await?;
+
+    // Create a dummy commit file
+    let commit_content = serde_json::json!({
+        "add": {
+            "path": "file-5.parquet",
+            "size": 1000,
+            "modificationTime": 1677811175,
+            "dataChange": true
+        }
+    })
+    .to_string();
+    store
+        .put(
+            &Path::from("_delta_log/00000000000000000005.json"),
+            commit_content.into(),
+        )
+        .await?;
+
+    let log_root = Url::parse("memory:///_delta_log/").unwrap();
+    let listed_files = ListedLogFiles::new(
+        vec![create_log_path(
+            "file:///_delta_log/00000000000000000005.json",
+        )],
+        vec![],
+        vec![],
+        Some(ParsedLogPath {
+            version: 5,
+            file_type: LogPathFileType::Crc,
+            location: FileMeta::new(
+                Url::parse("memory:///_delta_log/00000000000000000005.crc").unwrap(),
+                0,
+                0,
+            ),
+            filename: "00000000000000000005.crc".to_string(),
+            extension: "crc".to_string(),
+        }),
+    );
+
+    let log_segment = LogSegment::try_new(listed_files, log_root, Some(5))?;
+
     // Should error when CRC is missing metadata
     let result = log_segment.protocol_and_metadata(&engine);
     assert!(result.is_err());
-    
+
     if let Err(e) = result {
-        assert!(e.to_string().contains("Metadata") || e.to_string().contains("metadata"));
+        // Current implementation returns JSON parsing error rather than specific message
+        assert!(e.to_string().contains("whilst decoding field 'metadata'"));
     }
 
     Ok(())
@@ -318,19 +753,41 @@ fn test_protocol_metadata_crc_without_metadata_should_error() -> DeltaResult<()>
 
 #[test]
 fn test_find_commit_cover_with_crc_pruned_segment() -> DeltaResult<()> {
-    // Test case 8: Verify find_commit_cover works correctly with pruned segments
-    let (_, log_root) = new_in_memory_store();
+    // Test case: Verify find_commit_cover works correctly with pruned segments
+    let log_root = Url::parse("memory:///_delta_log/").unwrap();
 
-    // Create a pruned segment (simulating what happens in protocol_and_metadata)
-    let mut log_segment = create_log_segment_with_crc(
-        log_root.clone(),
-        Some(3),
-        5,
-        8,
-        vec![0, 1, 2, 3, 4, 5, 6, 7, 8],
+    // Create a segment with checkpoint at v3, CRC at v5, commits up to v8
+    let listed_files = ListedLogFiles::new(
+        vec![
+            create_log_path("file:///_delta_log/00000000000000000000.json"),
+            create_log_path("file:///_delta_log/00000000000000000001.json"),
+            create_log_path("file:///_delta_log/00000000000000000002.json"),
+            create_log_path("file:///_delta_log/00000000000000000003.json"),
+            create_log_path("file:///_delta_log/00000000000000000004.json"),
+            create_log_path("file:///_delta_log/00000000000000000005.json"),
+            create_log_path("file:///_delta_log/00000000000000000006.json"),
+            create_log_path("file:///_delta_log/00000000000000000007.json"),
+            create_log_path("file:///_delta_log/00000000000000000008.json"),
+        ],
+        vec![],
+        vec![],
+        Some(ParsedLogPath {
+            version: 5,
+            file_type: LogPathFileType::Crc,
+            location: FileMeta::new(
+                Url::parse("memory:///_delta_log/00000000000000000005.crc").unwrap(),
+                0,
+                0,
+            ),
+            filename: "00000000000000000005.crc".to_string(),
+            extension: "crc".to_string(),
+        }),
     );
 
-    // Simulate pruning
+    let mut log_segment = LogSegment::try_new(listed_files, log_root, Some(8))?;
+    log_segment.checkpoint_version = Some(3);
+
+    // Simulate pruning (what happens in protocol_and_metadata)
     log_segment.checkpoint_version = None;
     log_segment.checkpoint_parts.clear();
     log_segment.ascending_commit_files.retain(|c| c.version > 5);
@@ -339,180 +796,25 @@ fn test_find_commit_cover_with_crc_pruned_segment() -> DeltaResult<()> {
     let covered_files = log_segment.find_commit_cover();
     assert_eq!(covered_files.len(), 3);
 
-    Ok(())
-}
-
-// Helper functions for creating test data
-
-fn create_crc_with_pm(version: Version) -> Vec<u8> {
-    let crc_json = json!({
-        "crc": {
-            "tableSizeBytes": 1000,
-            "numFiles": 10,
-            "numMetadata": 1,
-            "numProtocol": 1,
-            "metadata": {
-                "id": format!("test-table-{}", version),
-                "format": {
-                    "provider": "parquet",
-                    "options": {}
-                },
-                "schemaString": r#"{"type":"struct","fields":[{"name":"value","type":"integer","nullable":true,"metadata":{}}]}"#,
-                "partitionColumns": [],
-                "configuration": {},
-                "createdTime": 1677811175
-            },
-            "protocol": {
-                "minReaderVersion": 3,
-                "minWriterVersion": 7,
-                "readerFeatures": ["columnMapping"],
-                "writerFeatures": ["columnMapping"]
+    // Verify the versions are correct
+    let versions: Vec<u64> = covered_files
+        .iter()
+        .filter_map(|f| {
+            let path_str = f.location.path();
+            if path_str.contains(".json") {
+                // Extract version from filename like "00000000000000000006.json"
+                path_str
+                    .split('/')
+                    .last()
+                    .and_then(|filename| filename.split('.').next())
+                    .and_then(|version_str| version_str.parse::<u64>().ok())
+            } else {
+                None
             }
-        }
-    });
-    crc_json.to_string().into_bytes()
-}
+        })
+        .collect();
 
-fn create_crc_without_protocol(version: Version) -> Vec<u8> {
-    let crc_json = json!({
-        "crc": {
-            "tableSizeBytes": 1000,
-            "numFiles": 10,
-            "numMetadata": 1,
-            "numProtocol": 0,
-            "metadata": {
-                "id": format!("test-table-{}", version),
-                "format": {
-                    "provider": "parquet",
-                    "options": {}
-                },
-                "schemaString": r#"{"type":"struct","fields":[{"name":"value","type":"integer","nullable":true,"metadata":{}}]}"#,
-                "partitionColumns": [],
-                "configuration": {},
-                "createdTime": 1677811175
-            }
-        }
-    });
-    crc_json.to_string().into_bytes()
-}
+    assert_eq!(versions, vec![8, 7, 6]); // Reversed order as find_commit_cover returns descending
 
-fn create_crc_without_metadata(_version: Version) -> Vec<u8> {
-    let crc_json = json!({
-        "crc": {
-            "tableSizeBytes": 1000,
-            "numFiles": 10,
-            "numMetadata": 0,
-            "numProtocol": 1,
-            "protocol": {
-                "minReaderVersion": 3,
-                "minWriterVersion": 7,
-                "readerFeatures": ["columnMapping"],
-                "writerFeatures": ["columnMapping"]
-            }
-        }
-    });
-    crc_json.to_string().into_bytes()
-}
-
-fn create_commit_with_pm(
-    store: &dyn ObjectStore,
-    log_root: &Url,
-    version: Version,
-) -> DeltaResult<()> {
-    let commit_json = json!({
-        "metadata": {
-            "id": format!("test-table-{}", version),
-            "format": {
-                "provider": "parquet",
-                "options": {}
-            },
-            "schemaString": r#"{"type":"struct","fields":[{"name":"value","type":"integer","nullable":true,"metadata":{}}]}"#,
-            "partitionColumns": [],
-            "configuration": {},
-            "createdTime": 1677811175
-        }
-    }).to_string() + "\n" + &json!({
-        "protocol": {
-            "minReaderVersion": 3,
-            "minWriterVersion": 7,
-            "readerFeatures": ["columnMapping"],
-            "writerFeatures": ["columnMapping"]
-        }
-    }).to_string();
-    
-    let commit_path = commit_log_path(log_root, version, Some("json"))?;
-    block_on(async {
-        store.put(&Path::from(commit_path.as_str()), commit_json.into()).await
-    })?;
-    Ok(())
-}
-
-fn create_commit_without_pm(
-    store: &dyn ObjectStore,
-    log_root: &Url,
-    version: Version,
-) -> DeltaResult<()> {
-    // Create a commit with just add actions, no P+M
-    let commit_json = json!({
-        "add": {
-            "path": format!("file-{}.parquet", version),
-            "size": 1000,
-            "modificationTime": 1677811175,
-            "dataChange": true
-        }
-    }).to_string();
-    
-    let commit_path = commit_log_path(log_root, version, Some("json"))?;
-    block_on(async {
-        store.put(&Path::from(commit_path.as_str()), commit_json.into()).await
-    })?;
-    Ok(())
-}
-
-fn create_checkpoint(
-    store: &dyn ObjectStore,
-    log_root: &Url,
-    version: Version,
-) -> DeltaResult<()> {
-    // For now, create an empty checkpoint file
-    let checkpoint_path = commit_log_path(log_root, version, Some("checkpoint.parquet"))?;
-    block_on(async {
-        store.put(&Path::from(checkpoint_path.as_str()), vec![].into()).await
-    })?;
-    Ok(())
-}
-
-fn create_checkpoint_with_pm(
-    store: &dyn ObjectStore,
-    log_root: &Url,
-    version: Version,
-) -> DeltaResult<()> {
-    // This would need proper parquet writing in real implementation
-    // For now, we'll create a JSON checkpoint for simplicity
-    let checkpoint_json = json!({
-        "metadata": {
-            "id": format!("test-table-{}", version),
-            "format": {
-                "provider": "parquet",
-                "options": {}
-            },
-            "schemaString": r#"{"type":"struct","fields":[{"name":"value","type":"integer","nullable":true,"metadata":{}}]}"#,
-            "partitionColumns": [],
-            "configuration": {},
-            "createdTime": 1677811175
-        }
-    }).to_string() + "\n" + &json!({
-        "protocol": {
-            "minReaderVersion": 3,
-            "minWriterVersion": 7,
-            "readerFeatures": ["columnMapping"],
-            "writerFeatures": ["columnMapping"]
-        }
-    }).to_string();
-    
-    let checkpoint_path = commit_log_path(log_root, version, Some("checkpoint.json"))?;
-    block_on(async {
-        store.put(&Path::from(checkpoint_path.as_str()), checkpoint_json.into()).await
-    })?;
     Ok(())
 }

@@ -335,7 +335,6 @@ mod tests {
         });
 
         let json = crc_json.to_string().into_bytes();
-        // let (engine, store) = DefaultEngine::new_memory();
         let store = Arc::new(InMemory::new());
         let engine = Arc::new(DefaultEngine::new(
             store.clone(),
@@ -391,7 +390,6 @@ mod tests {
         });
 
         let json = crc_json.to_string().into_bytes();
-        // let (engine, store) = DefaultEngine::new_memory();
         let store = Arc::new(InMemory::new());
         let engine = Arc::new(DefaultEngine::new(
             store.clone(),
