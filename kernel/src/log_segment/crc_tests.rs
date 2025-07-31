@@ -1,13 +1,13 @@
-use std::sync::Arc;
 use std::collections::HashMap;
+use std::sync::Arc;
 
+use crate::actions::{Format, Metadata, Protocol};
 use crate::engine::default::executor::tokio::TokioBackgroundExecutor;
 use crate::engine::default::DefaultEngine;
-use crate::log_segment::{ListedLogFiles, LogSegment, LogPathFileType, ParsedLogPath};
+use crate::log_segment::{ListedLogFiles, LogPathFileType, LogSegment, ParsedLogPath};
 use crate::object_store::{memory::InMemory, path::Path, ObjectStore};
-use crate::utils::test_utils::Action;
-use crate::actions::{Metadata, Protocol, Format};
 use crate::table_features::{ReaderFeature, WriterFeature};
+use crate::utils::test_utils::Action;
 use crate::{DeltaResult, FileMeta};
 use serde_json;
 use url::Url;
@@ -36,7 +36,7 @@ async fn write_checkpoint_to_store(
         .map(|action| serde_json::to_string(action).unwrap())
         .collect();
     let content = json_lines.join("\n");
-    let checkpoint_path = format!("_delta_log/{}", filename);
+    let checkpoint_path = format!("_delta_log/{filename}");
     store
         .put(&Path::from(checkpoint_path), content.into())
         .await?;
@@ -327,7 +327,7 @@ async fn test_protocol_metadata_fallback_to_crc() -> DeltaResult<()> {
 
         store
             .put(
-                &Path::from(format!("_delta_log/{:020}.json", v).as_str()),
+                &Path::from(format!("_delta_log/{v:020}.json").as_str()),
                 commit_content.into(),
             )
             .await?;
@@ -432,7 +432,13 @@ async fn test_protocol_metadata_with_crc_older_than_checkpoint() -> DeltaResult<
         Some(vec![WriterFeature::ColumnMapping]),
     )?;
 
-    write_checkpoint_to_store(&store, "00000000000000000005.checkpoint.json", metadata, protocol).await?;
+    write_checkpoint_to_store(
+        &store,
+        "00000000000000000005.checkpoint.json",
+        metadata,
+        protocol,
+    )
+    .await?;
 
     // Create commits for versions 6, 7, 8
     for v in 6..=8 {
@@ -447,7 +453,7 @@ async fn test_protocol_metadata_with_crc_older_than_checkpoint() -> DeltaResult<
         .to_string();
         store
             .put(
-                &Path::from(format!("_delta_log/{:020}.json", v).as_str()),
+                &Path::from(format!("_delta_log/{v:020}.json").as_str()),
                 commit_content.into(),
             )
             .await?;
@@ -531,7 +537,13 @@ async fn test_protocol_metadata_no_crc_file() -> DeltaResult<()> {
         Some(vec![WriterFeature::ColumnMapping]),
     )?;
 
-    write_checkpoint_to_store(&store, "00000000000000000003.checkpoint.json", metadata, protocol).await?;
+    write_checkpoint_to_store(
+        &store,
+        "00000000000000000003.checkpoint.json",
+        metadata,
+        protocol,
+    )
+    .await?;
 
     // Create commits 4 and 5
     for v in 4..=5 {
@@ -546,7 +558,7 @@ async fn test_protocol_metadata_no_crc_file() -> DeltaResult<()> {
         .to_string();
         store
             .put(
-                &Path::from(format!("_delta_log/{:020}.json", v).as_str()),
+                &Path::from(format!("_delta_log/{v:020}.json").as_str()),
                 commit_content.into(),
             )
             .await?;
@@ -805,7 +817,7 @@ fn test_find_commit_cover_with_crc_pruned_segment() -> DeltaResult<()> {
                 // Extract version from filename like "00000000000000000006.json"
                 path_str
                     .split('/')
-                    .last()
+                    .next_back()
                     .and_then(|filename| filename.split('.').next())
                     .and_then(|version_str| version_str.parse::<u64>().ok())
             } else {
