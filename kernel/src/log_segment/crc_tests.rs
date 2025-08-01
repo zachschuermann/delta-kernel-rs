@@ -1,49 +1,39 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::actions::{Format, Metadata, Protocol};
+use crate::actions::{get_log_schema, Format, Metadata, Protocol};
+use crate::arrow::array::StringArray;
+use crate::engine::arrow_data::ArrowEngineData;
 use crate::engine::default::executor::tokio::TokioBackgroundExecutor;
 use crate::engine::default::DefaultEngine;
+use crate::engine::sync::json::SyncJsonHandler;
+use crate::log_segment::tests::{add_checkpoint_to_store, create_log_path};
 use crate::log_segment::{ListedLogFiles, LogPathFileType, LogSegment, ParsedLogPath};
 use crate::object_store::{memory::InMemory, path::Path, ObjectStore};
 use crate::table_features::{ReaderFeature, WriterFeature};
-use crate::utils::test_utils::Action;
-use crate::{DeltaResult, FileMeta};
+use crate::utils::test_utils::{string_array_to_engine_data, Action};
+use crate::{DeltaResult, FileMeta, JsonHandler};
 use serde_json;
 use url::Url;
 
-// Helper function to create log paths (copied from tests.rs since it's private)
-fn create_log_path(path: &str) -> ParsedLogPath<FileMeta> {
-    ParsedLogPath::try_from(FileMeta {
-        location: Url::parse(path).expect("Invalid file URL"),
-        last_modified: 0,
-        size: 0,
-    })
-    .unwrap()
-    .unwrap()
-}
-
-// Helper function to write checkpoint with Protocol and Metadata actions
-async fn write_checkpoint_to_store(
-    store: &Arc<InMemory>,
-    filename: &str,
+// Helper function to create checkpoint data with Protocol and Metadata actions
+fn create_checkpoint_data(
     metadata: Metadata,
     protocol: Protocol,
-) -> DeltaResult<()> {
+) -> DeltaResult<Box<ArrowEngineData>> {
+    let handler = SyncJsonHandler {};
     let actions = vec![Action::Metadata(metadata), Action::Protocol(protocol)];
-    let json_lines: Vec<String> = actions
+    let json_strings: Vec<String> = actions
         .iter()
         .map(|action| serde_json::to_string(action).unwrap())
         .collect();
-    let content = json_lines.join("\n");
-    let checkpoint_path = format!("_delta_log/{filename}");
-    store
-        .put(&Path::from(checkpoint_path), content.into())
-        .await?;
-    Ok(())
+    let string_array: StringArray = json_strings.into();
+    let parsed = handler.parse_json(
+        string_array_to_engine_data(string_array),
+        get_log_schema().clone(),
+    )?;
+    Ok(ArrowEngineData::try_from_engine_data(parsed)?)
 }
-
-// CRC Protocol and Metadata replay tests
 
 #[tokio::test]
 async fn test_protocol_metadata_with_crc_at_target_version() -> DeltaResult<()> {
@@ -432,13 +422,12 @@ async fn test_protocol_metadata_with_crc_older_than_checkpoint() -> DeltaResult<
         Some(vec![WriterFeature::ColumnMapping]),
     )?;
 
-    write_checkpoint_to_store(
+    let checkpoint_data = create_checkpoint_data(metadata, protocol)?;
+    add_checkpoint_to_store(
         &store,
-        "00000000000000000005.checkpoint.json",
-        metadata,
-        protocol,
-    )
-    .await?;
+        checkpoint_data,
+        "00000000000000000005.checkpoint.parquet",
+    )?;
 
     // Create commits for versions 6, 7, 8
     for v in 6..=8 {
@@ -472,12 +461,12 @@ async fn test_protocol_metadata_with_crc_older_than_checkpoint() -> DeltaResult<
             version: 5,
             file_type: LogPathFileType::SinglePartCheckpoint,
             location: FileMeta::new(
-                Url::parse("memory:///_delta_log/00000000000000000005.checkpoint.json").unwrap(),
+                Url::parse("memory:///_delta_log/00000000000000000005.checkpoint.parquet").unwrap(),
                 0,
                 0,
             ),
-            filename: "00000000000000000005.checkpoint.json".to_string(),
-            extension: "json".to_string(),
+            filename: "00000000000000000005.checkpoint.parquet".to_string(),
+            extension: "parquet".to_string(),
         }],
         Some(ParsedLogPath {
             version: 2,
@@ -537,13 +526,12 @@ async fn test_protocol_metadata_no_crc_file() -> DeltaResult<()> {
         Some(vec![WriterFeature::ColumnMapping]),
     )?;
 
-    write_checkpoint_to_store(
+    let checkpoint_data = create_checkpoint_data(metadata, protocol)?;
+    add_checkpoint_to_store(
         &store,
-        "00000000000000000003.checkpoint.json",
-        metadata,
-        protocol,
-    )
-    .await?;
+        checkpoint_data,
+        "00000000000000000003.checkpoint.parquet",
+    )?;
 
     // Create commits 4 and 5
     for v in 4..=5 {
@@ -576,12 +564,12 @@ async fn test_protocol_metadata_no_crc_file() -> DeltaResult<()> {
             version: 3,
             file_type: LogPathFileType::SinglePartCheckpoint,
             location: FileMeta::new(
-                Url::parse("memory:///_delta_log/00000000000000000003.checkpoint.json").unwrap(),
+                Url::parse("memory:///_delta_log/00000000000000000003.checkpoint.parquet").unwrap(),
                 0,
                 0,
             ),
-            filename: "00000000000000000003.checkpoint.json".to_string(),
-            extension: "json".to_string(),
+            filename: "00000000000000000003.checkpoint.parquet".to_string(),
+            extension: "parquet".to_string(),
         }],
         None, // No CRC file
     );
