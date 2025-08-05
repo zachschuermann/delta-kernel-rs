@@ -296,7 +296,7 @@ impl WriteContext {
         &self.target_dir
     }
 
-    /// Get the schema of the snapshot that this transaction is based on.
+    /// Get the logical schema of the read snapshot that this transaction is based on.
     pub fn snapshot_schema(&self) -> &SchemaRef {
         &self.snapshot_schema
     }
