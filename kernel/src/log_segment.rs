@@ -520,8 +520,6 @@ impl LogSegment {
         //       (CRC_version, target_version].
         //    b) if we don't have a CRC, or have a CRC older than most recent checkpoint, we proceed
         //       as normal (full log segment).
-        //
-        // TODO: leverage log compaction files?
         let protocol_metadata_log_segment: Cow<'_, Self> = match &self.latest_crc_file {
             Some(latest_crc_file)
                 if latest_crc_file.version >= self.checkpoint_version.unwrap_or(0) =>
@@ -533,6 +531,14 @@ impl LogSegment {
                 log_segment
                     .ascending_commit_files
                     .retain(|commit| commit.version > latest_crc_file.version);
+                // only keep compactions with end version > crc version
+                log_segment.ascending_compaction_files.retain(|compaction| {
+                    if let LogPathFileType::CompactedCommit { hi } = compaction.file_type {
+                        hi > latest_crc_file.version
+                    } else {
+                        false
+                    }
+                });
                 Cow::Owned(log_segment)
             }
             _ => Cow::Borrowed(self),
