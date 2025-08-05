@@ -308,7 +308,8 @@ async fn crc_pm_test(
     };
 
     let listed_files =
-        ListedLogFiles::new(commit_paths, compaction_paths, checkpoint_paths, crc_path);
+        ListedLogFiles::try_new(commit_paths, compaction_paths, checkpoint_paths, crc_path)
+            .unwrap();
 
     let log_segment = LogSegment::try_new(listed_files, log_root, target_version)?;
     Ok((log_segment, engine))
@@ -474,7 +475,7 @@ async fn test_crc_missing_protocol() -> DeltaResult<()> {
     store.put(&Path::from("_delta_log/00000000000000000005.json"),
         r#"{"add":{"path":"file.parquet","size":1000,"modificationTime":1000,"dataChange":true}}"#.into()).await?;
 
-    let listed_files = ListedLogFiles::new(
+    let listed_files = ListedLogFiles::try_new(
         vec![create_log_path(
             log_root.join("00000000000000000005.json")?.as_ref(),
         )],
@@ -487,7 +488,8 @@ async fn test_crc_missing_protocol() -> DeltaResult<()> {
             filename: "00000000000000000005.crc".to_string(),
             extension: "crc".to_string(),
         }),
-    );
+    )
+    .unwrap();
 
     let log_segment = LogSegment::try_new(listed_files, log_root, Some(5))?;
     let error = log_segment.protocol_and_metadata(&engine).unwrap_err();
@@ -524,7 +526,7 @@ async fn test_crc_missing_metadata() -> DeltaResult<()> {
     store.put(&Path::from("_delta_log/00000000000000000005.json"),
         r#"{"add":{"path":"file.parquet","size":1000,"modificationTime":1000,"dataChange":true}}"#.into()).await?;
 
-    let listed_files = ListedLogFiles::new(
+    let listed_files = ListedLogFiles::try_new(
         vec![create_log_path(
             log_root.join("00000000000000000005.json")?.as_ref(),
         )],
@@ -537,7 +539,8 @@ async fn test_crc_missing_metadata() -> DeltaResult<()> {
             filename: "00000000000000000005.crc".to_string(),
             extension: "crc".to_string(),
         }),
-    );
+    )
+    .unwrap();
 
     let log_segment = LogSegment::try_new(listed_files, log_root, Some(5))?;
     let error = log_segment.protocol_and_metadata(&engine).unwrap_err();
