@@ -37,6 +37,8 @@ mod timestamp_ntz;
 #[serde(rename_all = "camelCase")]
 #[internal_api]
 pub(crate) enum ReaderFeature {
+    /// CatalogManaged tables: https://github.com/delta-io/delta/blob/master/protocol_rfcs/catalog-managed.md
+    CatalogManaged,
     /// Mapping of one column to another
     ColumnMapping,
     /// Deletion vectors for merge, update, delete
@@ -90,6 +92,8 @@ pub(crate) enum ReaderFeature {
 #[serde(rename_all = "camelCase")]
 #[internal_api]
 pub(crate) enum WriterFeature {
+    /// CatalogManaged tables: https://github.com/delta-io/delta/blob/master/protocol_rfcs/catalog-managed.md
+    CatalogManaged,
     /// Append Only Tables
     AppendOnly,
     /// Table invariants
@@ -188,6 +192,8 @@ impl WriterFeature {
 
 pub(crate) static SUPPORTED_READER_FEATURES: LazyLock<Vec<ReaderFeature>> = LazyLock::new(|| {
     vec![
+        #[cfg(feature = "internal-api")]
+        ReaderFeature::CatalogManaged,
         ReaderFeature::ColumnMapping,
         ReaderFeature::DeletionVectors,
         ReaderFeature::TimestampWithoutTimezone,
@@ -262,6 +268,7 @@ mod tests {
     #[test]
     fn test_roundtrip_reader_features() {
         let cases = [
+            (ReaderFeature::CatalogManaged, "catalogManaged"),
             (ReaderFeature::ColumnMapping, "columnMapping"),
             (ReaderFeature::DeletionVectors, "deletionVectors"),
             (ReaderFeature::TimestampWithoutTimezone, "timestampNtz"),
@@ -297,6 +304,7 @@ mod tests {
     fn test_roundtrip_writer_features() {
         let cases = [
             (WriterFeature::AppendOnly, "appendOnly"),
+            (WriterFeature::CatalogManaged, "catalogManaged"),
             (WriterFeature::Invariants, "invariants"),
             (WriterFeature::CheckConstraints, "checkConstraints"),
             (WriterFeature::ChangeDataFeed, "changeDataFeed"),

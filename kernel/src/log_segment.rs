@@ -131,18 +131,53 @@ impl LogSegment {
     pub(crate) fn for_snapshot(
         storage: &dyn StorageHandler,
         log_root: Url,
-        checkpoint_hint: impl Into<Option<LastCheckpointHint>>,
+        log_tail: Vec<ParsedLogPath>,
         time_travel_version: impl Into<Option<Version>>,
+    ) -> DeltaResult<Self> {
+        let tail_start = log_tail.first().map(|f| f.version);
+
+        // if log_tail is 'complete' we just return it as a LogSegment
+        if tail_start == Some(0) {
+            return LogSegment::try_new(
+                ListedLogFiles::try_new(log_tail, vec![], vec![], None)?,
+                log_root,
+                time_travel_version.into(),
+            );
+        }
+        // else, do _last_checkpoint read + list and append log_tail
+        let checkpoint_hint = crate::snapshot::read_last_checkpoint(storage, &log_root)?;
+        LogSegment::for_snapshot_impl(
+            storage,
+            log_root,
+            log_tail,
+            time_travel_version,
+            tail_start,
+            checkpoint_hint,
+        )
+    }
+
+    // factored out for testing
+    fn for_snapshot_impl(
+        storage: &dyn StorageHandler,
+        log_root: Url,
+        log_tail: Vec<ParsedLogPath>,
+        time_travel_version: impl Into<Option<Version>>,
+        tail_start: Option<Version>,
+        checkpoint_hint: Option<LastCheckpointHint>,
     ) -> DeltaResult<Self> {
         let time_travel_version = time_travel_version.into();
 
-        let listed_files = match (checkpoint_hint.into(), time_travel_version) {
+        // the end of our list is either: tail_start or the time_travel_version
+        let end_version: Option<Version> = tail_start.or(time_travel_version);
+        let mut listed_files = match (checkpoint_hint, end_version) {
             (Some(cp), None) => list_log_files_with_checkpoint(&cp, storage, &log_root, None)?,
             (Some(cp), Some(end_version)) if cp.version <= end_version => {
                 list_log_files_with_checkpoint(&cp, storage, &log_root, Some(end_version))?
             }
-            _ => list_log_files_with_version(storage, &log_root, None, time_travel_version)?,
+            _ => list_log_files_with_version(storage, &log_root, None, end_version)?,
         };
+        // append the log_tail to the listed files
+        listed_files.ascending_commit_files.extend(log_tail);
 
         LogSegment::try_new(listed_files, log_root, time_travel_version)
     }

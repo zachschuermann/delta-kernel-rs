@@ -8,6 +8,7 @@ use crate::actions::set_transaction::SetTransactionScanner;
 use crate::actions::{Metadata, Protocol, INTERNAL_DOMAIN_PREFIX};
 use crate::checkpoint::CheckpointWriter;
 use crate::log_segment::{self, ListedLogFiles, LogSegment};
+use crate::path::ParsedLogPath;
 use crate::scan::ScanBuilder;
 use crate::schema::{Schema, SchemaRef};
 use crate::table_configuration::TableConfiguration;
@@ -21,6 +22,9 @@ use delta_kernel_derive::internal_api;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 use url::Url;
+
+mod builder;
+use builder::CatalogSnapshotBuilder;
 
 /// Name of the _last_checkpoint file that provides metadata about the last checkpoint
 /// created for the table. This file is used as a hint for the engine to quickly locate
@@ -94,16 +98,21 @@ impl Snapshot {
         engine: &dyn Engine,
         version: Option<Version>,
     ) -> DeltaResult<Self> {
+        // FIXME: must check not catalogManaged
         let storage = engine.storage_handler();
         let log_root = table_root.join("_delta_log/")?;
-
-        let checkpoint_hint = read_last_checkpoint(storage.as_ref(), &log_root)?;
-
-        let log_segment =
-            LogSegment::for_snapshot(storage.as_ref(), log_root, checkpoint_hint, version)?;
+        let log_segment = LogSegment::for_snapshot(storage.as_ref(), log_root, vec![], version)?;
 
         // try_new_from_log_segment will ensure the protocol is supported
         Self::try_new_from_log_segment(table_root, log_segment, engine)
+    }
+
+    #[internal_api]
+    pub(crate) fn build_from_catalog(
+        table_root: Url,
+        log_tail: impl IntoIterator<Item = ParsedLogPath>,
+    ) -> CatalogSnapshotBuilder {
+        CatalogSnapshotBuilder::new(table_root, log_tail)
     }
 
     /// Create a new [`Snapshot`] instance from an existing [`Snapshot`]. This is useful when you
@@ -131,6 +140,7 @@ impl Snapshot {
         engine: &dyn Engine,
         version: impl Into<Option<Version>>,
     ) -> DeltaResult<Arc<Self>> {
+        // FIXME: must check not catalogManaged - track future work for updating this
         let old_log_segment = &existing_snapshot.log_segment;
         let old_version = existing_snapshot.version();
         let new_version = version.into();
@@ -425,7 +435,7 @@ pub(crate) struct LastCheckpointHint {
 /// cause failure.
 // TODO(#1047): weird that we propagate FileNotFound as part of the iterator instead of top-level
 // result coming from storage.read_files
-fn read_last_checkpoint(
+pub(crate) fn read_last_checkpoint(
     storage: &dyn StorageHandler,
     log_root: &Url,
 ) -> DeltaResult<Option<LastCheckpointHint>> {
