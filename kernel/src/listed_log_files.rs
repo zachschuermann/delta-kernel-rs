@@ -1,3 +1,17 @@
+//! [`ListedLogFiles`] is a struct holding the result of listing the delta log. Currently, it
+//! exposes three APIs for listing:
+//! 1. [`list_commits`]: Lists all commit files between the provided start and end versions.
+//! 2. [`list`]: Lists all commit and checkpoint files between the provided start and end versions.
+//! 3. [`list_with_checkpoint_hint`]: Lists all commit and checkpoint files after the provided
+//!    checkpoint hint.
+//!
+//! After listing, one can leverage the [`ListedLogFiles`] to construct a [`LogSegment`].
+//!
+//! [`list_commits`]: Self::list_commits
+//! [`list`]: Self::list
+//! [`list_with_checkpoint_hint`]: Self::list_with_checkpoint_hint
+//! [`LogSegment`]: crate::log_segment::LogSegment
+
 use std::collections::HashMap;
 use std::convert::identity;
 
@@ -101,9 +115,40 @@ fn group_checkpoint_parts(parts: Vec<ParsedLogPath>) -> HashMap<u32, Vec<ParsedL
 }
 
 impl ListedLogFiles {
-    // TODO: enforce the usage of this construct to enforce the assertion (issue#1143)
-    #[internal_api]
+    // HACK: for now we allow try_new in tests
+
+    #[cfg(not(test))]
+    fn try_new(
+        ascending_commit_files: Vec<ParsedLogPath>,
+        ascending_compaction_files: Vec<ParsedLogPath>,
+        checkpoint_parts: Vec<ParsedLogPath>,
+        latest_crc_file: Option<ParsedLogPath>,
+    ) -> DeltaResult<Self> {
+        Self::try_new_impl(
+            ascending_commit_files,
+            ascending_compaction_files,
+            checkpoint_parts,
+            latest_crc_file,
+        )
+    }
+
+    #[cfg(test)]
     pub(crate) fn try_new(
+        ascending_commit_files: Vec<ParsedLogPath>,
+        ascending_compaction_files: Vec<ParsedLogPath>,
+        checkpoint_parts: Vec<ParsedLogPath>,
+        latest_crc_file: Option<ParsedLogPath>,
+    ) -> DeltaResult<Self> {
+        Self::try_new_impl(
+            ascending_commit_files,
+            ascending_compaction_files,
+            checkpoint_parts,
+            latest_crc_file,
+        )
+    }
+
+    // TODO: enforce the usage of this construct to enforce the assertion (issue#1143)
+    fn try_new_impl(
         ascending_commit_files: Vec<ParsedLogPath>,
         ascending_compaction_files: Vec<ParsedLogPath>,
         checkpoint_parts: Vec<ParsedLogPath>,
