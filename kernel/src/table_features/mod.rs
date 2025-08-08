@@ -39,6 +39,9 @@ mod timestamp_ntz;
 pub(crate) enum ReaderFeature {
     /// CatalogManaged tables: https://github.com/delta-io/delta/blob/master/protocol_rfcs/catalog-managed.md
     CatalogManaged,
+    #[strum(serialize = "catalogOwned-preview")]
+    #[serde(rename = "catalogOwned-preview")]
+    CatalogOwnedPreview,
     /// Mapping of one column to another
     ColumnMapping,
     /// Deletion vectors for merge, update, delete
@@ -94,6 +97,9 @@ pub(crate) enum ReaderFeature {
 pub(crate) enum WriterFeature {
     /// CatalogManaged tables: https://github.com/delta-io/delta/blob/master/protocol_rfcs/catalog-managed.md
     CatalogManaged,
+    #[strum(serialize = "catalogOwned-preview")]
+    #[serde(rename = "catalogOwned-preview")]
+    CatalogOwnedPreview,
     /// Append Only Tables
     AppendOnly,
     /// Table invariants
@@ -194,6 +200,8 @@ pub(crate) static SUPPORTED_READER_FEATURES: LazyLock<Vec<ReaderFeature>> = Lazy
     vec![
         #[cfg(feature = "internal-api")]
         ReaderFeature::CatalogManaged,
+        #[cfg(feature = "internal-api")]
+        ReaderFeature::CatalogOwnedPreview,
         ReaderFeature::ColumnMapping,
         ReaderFeature::DeletionVectors,
         ReaderFeature::TimestampWithoutTimezone,
@@ -220,6 +228,8 @@ pub(crate) static SUPPORTED_WRITER_FEATURES: LazyLock<Vec<WriterFeature>> = Lazy
         WriterFeature::AppendOnly,
         #[cfg(feature = "internal-api")]
         WriterFeature::CatalogManaged,
+        #[cfg(feature = "internal-api")]
+        WriterFeature::CatalogOwnedPreview,
         WriterFeature::DeletionVectors,
         WriterFeature::Invariants,
         WriterFeature::TimestampWithoutTimezone,

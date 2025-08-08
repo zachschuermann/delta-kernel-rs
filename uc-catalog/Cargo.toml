@@ -1,0 +1,19 @@
+[package]
+name = "uc-catalog"
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+uc-client = { path = "../uc-client" }
+delta_kernel = { path = "../kernel", features = ["arrow", "default-engine", "internal-api"] }
+# futures = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["full"] }
+url = "2"

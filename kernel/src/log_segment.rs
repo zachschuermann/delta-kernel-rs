@@ -144,6 +144,7 @@ impl LogSegment {
                 time_travel_version.into(),
             );
         }
+        panic!("shouldn't list");
         // else, do _last_checkpoint read + list and append log_tail
         let checkpoint_hint = crate::snapshot::read_last_checkpoint(storage, &log_root)?;
         LogSegment::for_snapshot_impl(
