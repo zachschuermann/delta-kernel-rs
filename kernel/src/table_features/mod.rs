@@ -218,6 +218,8 @@ pub(crate) static SUPPORTED_READER_FEATURES: LazyLock<Vec<ReaderFeature>> = Lazy
 pub(crate) static SUPPORTED_WRITER_FEATURES: LazyLock<Vec<WriterFeature>> = LazyLock::new(|| {
     vec![
         WriterFeature::AppendOnly,
+        #[cfg(feature = "internal-api")]
+        WriterFeature::CatalogManaged,
         WriterFeature::DeletionVectors,
         WriterFeature::Invariants,
         WriterFeature::TimestampWithoutTimezone,
