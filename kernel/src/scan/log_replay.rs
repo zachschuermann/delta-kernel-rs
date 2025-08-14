@@ -1,5 +1,7 @@
 use std::clone::Clone;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::sync::{Arc, LazyLock};
 
 use itertools::Itertools;
@@ -87,6 +89,8 @@ struct AddRemoveDedupVisitor<'seen> {
     partition_filter: Option<PredicateRef>,
     transform_cache: TransformCache,
     transform_indices: Vec<Option<usize>>,
+    // cache partition value combinations to transform indices
+    partition_cache: HashMap<u64, usize>,
 }
 
 impl AddRemoveDedupVisitor<'_> {
@@ -121,6 +125,7 @@ impl AddRemoveDedupVisitor<'_> {
             partition_filter,
             transform_cache: TransformCache::new(),
             transform_indices: Vec::new(),
+            partition_cache: HashMap::new(),
         }
     }
 
@@ -180,6 +185,22 @@ impl AddRemoveDedupVisitor<'_> {
         Ok(Arc::new(Expression::Struct(transforms)))
     }
 
+    /// Create a hash-based cache key from partition values
+    fn partition_values_to_cache_key(&self, partition_values: &HashMap<String, String>) -> u64 {
+        let mut hasher = DefaultHasher::new();
+
+        // Sort keys to ensure deterministic hashing
+        let mut keys: Vec<_> = partition_values.keys().collect();
+        keys.sort();
+
+        for key in keys {
+            key.hash(&mut hasher);
+            partition_values[key].hash(&mut hasher);
+        }
+
+        hasher.finish()
+    }
+
     fn is_file_partition_pruned(
         &self,
         partition_values: &HashMap<usize, (String, Scalar)>,
@@ -222,33 +243,45 @@ impl AddRemoveDedupVisitor<'_> {
         // WARNING: It's not safe to partition-prune removes (just like it's not safe to data skip
         // removes), because they are needed to suppress earlier incompatible adds we might
         // encounter if the table's schema was replaced after the most recent checkpoint.
-        let partition_values = match &self.transform {
+        let (raw_partition_values, parsed_partition_values) = match &self.transform {
             Some(transform) if is_add => {
-                let partition_values =
+                let raw_partition_values =
                     getters[Self::ADD_PARTITION_VALUES_INDEX].get(i, "add.partitionValues")?;
-                let partition_values = self.parse_partition_values(transform, &partition_values)?;
-                if self.is_file_partition_pruned(&partition_values) {
+                let parsed_partition_values =
+                    self.parse_partition_values(transform, &raw_partition_values)?;
+                if self.is_file_partition_pruned(&parsed_partition_values) {
                     return Ok(false);
                 }
-                partition_values
+                (Some(raw_partition_values), parsed_partition_values)
             }
-            _ => Default::default(),
+            _ => (None, Default::default()),
         };
 
         // Check both adds and removes (skipping already-seen), but only transform and return adds
         if self.deduplicator.check_and_record_seen(file_key) || !is_add {
             return Ok(false);
         }
-        if let Some(transform_expr) = self
-            .transform // Option<Arc<Transform>>, Transform is Vec<TransformExpr>
-            .as_ref()
-            .map(|transform| self.get_transform_expr(transform, partition_values))
-            .transpose()?
-        {
-            // fill in any needed `None`s for previous rows
-            self.transform_indices.resize_with(i, Default::default);
-            let idx = self.transform_cache.get_or_insert(transform_expr);
-            self.transform_indices.push(Some(idx));
+        if let Some(transform) = self.transform.as_ref() {
+            if let Some(raw_partition_values) = raw_partition_values {
+                // Convert to sorted Vec for cache key
+                let cache_key = self.partition_values_to_cache_key(&raw_partition_values);
+
+                let idx = if let Some(&cached_idx) = self.partition_cache.get(&cache_key) {
+                    // Cache hit - reuse existing transform
+                    cached_idx
+                } else {
+                    // Cache miss - build new transform
+                    let transform_expr =
+                        self.get_transform_expr(transform, parsed_partition_values)?;
+                    let idx = self.transform_cache.get_or_insert(transform_expr);
+                    self.partition_cache.insert(cache_key, idx);
+                    idx
+                };
+
+                // fill in any needed `None`s for previous rows
+                self.transform_indices.resize_with(i, Default::default);
+                self.transform_indices.push(Some(idx));
+            }
         }
         Ok(true)
     }
@@ -380,6 +413,7 @@ impl LogReplayProcessor for ScanLogReplayProcessor {
 
         // TODO: Teach expression eval to respect the selection vector we just computed so carefully!
         let result = self.add_transform.evaluate(actions.as_ref())?;
+
         Ok(ScanMetadata::new(
             result,
             visitor.selection_vector,
