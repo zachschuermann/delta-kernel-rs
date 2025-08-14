@@ -336,7 +336,7 @@ impl TransformCache {
     }
 
     /// Get or insert a transform expression, returning its index
-    /// 
+    ///
     /// This does a linear search to find existing transforms. While not optimal
     /// for very large numbers of unique transforms, in practice the number of
     /// unique transforms is typically small (e.g., one per partition value).
