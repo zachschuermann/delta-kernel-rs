@@ -5,7 +5,7 @@ use std::sync::{Arc, LazyLock};
 use itertools::Itertools;
 
 use super::data_skipping::DataSkippingFilter;
-use super::{ScanMetadata, Transform};
+use super::{ScanMetadata, Transform, TransformCache};
 use crate::actions::deletion_vector::DeletionVectorDescriptor;
 use crate::actions::get_log_add_schema;
 use crate::engine_data::{GetData, RowVisitor, TypedGetData as _};
@@ -85,7 +85,8 @@ struct AddRemoveDedupVisitor<'seen> {
     logical_schema: SchemaRef,
     transform: Option<Arc<Transform>>,
     partition_filter: Option<PredicateRef>,
-    row_transform_exprs: Vec<Option<ExpressionRef>>,
+    transform_cache: TransformCache,
+    transform_indices: Vec<Option<usize>>,
 }
 
 impl AddRemoveDedupVisitor<'_> {
@@ -118,7 +119,8 @@ impl AddRemoveDedupVisitor<'_> {
             logical_schema,
             transform,
             partition_filter,
-            row_transform_exprs: Vec::new(),
+            transform_cache: TransformCache::new(),
+            transform_indices: Vec::new(),
         }
     }
 
@@ -237,15 +239,16 @@ impl AddRemoveDedupVisitor<'_> {
         if self.deduplicator.check_and_record_seen(file_key) || !is_add {
             return Ok(false);
         }
-        let transform = self
-            .transform
+        if let Some(transform_expr) = self
+            .transform // Option<Arc<Transform>>, Transform is Vec<TransformExpr>
             .as_ref()
             .map(|transform| self.get_transform_expr(transform, partition_values))
-            .transpose()?;
-        if transform.is_some() {
+            .transpose()?
+        {
             // fill in any needed `None`s for previous rows
-            self.row_transform_exprs.resize_with(i, Default::default);
-            self.row_transform_exprs.push(transform);
+            self.transform_indices.resize_with(i, Default::default);
+            let idx = self.transform_cache.get_or_insert(transform_expr);
+            self.transform_indices.push(Some(idx));
         }
         Ok(true)
     }
@@ -380,7 +383,8 @@ impl LogReplayProcessor for ScanLogReplayProcessor {
         Ok(ScanMetadata::new(
             result,
             visitor.selection_vector,
-            visitor.row_transform_exprs,
+            Arc::new(visitor.transform_cache),
+            visitor.transform_indices,
         ))
     }
 
@@ -493,7 +497,7 @@ mod tests {
         for res in iter {
             let scan_metadata = res.unwrap();
             assert!(
-                scan_metadata.scan_file_transforms.is_empty(),
+                scan_metadata.scan_file_transform_indices.is_empty(),
                 "Should have no transforms"
             );
         }
@@ -544,7 +548,12 @@ mod tests {
 
         for res in iter {
             let scan_metadata = res.unwrap();
-            let transforms = scan_metadata.scan_file_transforms;
+            // Extract transforms from the cache
+            let transforms: Vec<_> = scan_metadata
+                .scan_file_transform_indices
+                .iter()
+                .map(|idx| idx.and_then(|i| scan_metadata.transform_cache.get(i).cloned()))
+                .collect();
             // in this case we have a metadata action first and protocol 3rd, so we expect 4 items,
             // the first and 3rd being a `None`
             assert_eq!(transforms.len(), 4, "Should have 4 transforms");
