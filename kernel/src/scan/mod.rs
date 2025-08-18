@@ -373,11 +373,8 @@ pub fn get_transform_for_row(
     transform_indices: &[Option<usize>],
     transform_cache: &TransformCache,
 ) -> Option<ExpressionRef> {
-    transform_indices
-        .get(row)
-        .and_then(|opt_idx| opt_idx.as_ref())
-        .and_then(|idx| transform_cache.get(*idx))
-        .cloned()
+    let idx = transform_indices.get(row)?.as_ref()?;
+    transform_cache.get(*idx).cloned()
 }
 
 /// Transforms aren't computed all at once. So static ones can just go straight to `Expression`, but

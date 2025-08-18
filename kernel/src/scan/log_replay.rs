@@ -266,16 +266,18 @@ impl AddRemoveDedupVisitor<'_> {
                 // Convert to sorted Vec for cache key
                 let cache_key = self.partition_values_to_cache_key(&raw_partition_values);
 
-                let idx = if let Some(&cached_idx) = self.partition_cache.get(&cache_key) {
-                    // Cache hit - reuse existing transform
-                    cached_idx
-                } else {
-                    // Cache miss - build new transform
-                    let transform_expr =
-                        self.get_transform_expr(transform, parsed_partition_values)?;
-                    let idx = self.transform_cache.get_or_insert(transform_expr);
-                    self.partition_cache.insert(cache_key, idx);
-                    idx
+                use std::collections::hash_map::Entry;
+                let idx = match self.partition_cache.entry(cache_key) {
+                    Entry::Occupied(entry) => *entry.get(),
+                    Entry::Vacant(entry) => {
+                        // cache miss - build new transform
+                        let cache_key = *entry.key();
+                        let transform_expr =
+                            self.get_transform_expr(transform, parsed_partition_values)?;
+                        let idx = self.transform_cache.get_or_insert(transform_expr);
+                        self.partition_cache.insert(cache_key, idx);
+                        idx
+                    }
                 };
 
                 // fill in any needed `None`s for previous rows
@@ -586,7 +588,7 @@ mod tests {
             let transforms: Vec<_> = scan_metadata
                 .scan_file_transform_indices
                 .iter()
-                .map(|idx| idx.and_then(|i| scan_metadata.transform_cache.get(i).cloned()))
+                .map(|idx| scan_metadata.transform_cache.get(*idx.as_ref()?).cloned())
                 .collect();
             // in this case we have a metadata action first and protocol 3rd, so we expect 4 items,
             // the first and 3rd being a `None`
