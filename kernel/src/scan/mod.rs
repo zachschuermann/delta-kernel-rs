@@ -2,9 +2,11 @@
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::sync::{Arc, LazyLock};
 
 use delta_kernel_derive::internal_api;
+use indexmap::IndexSet;
 use itertools::Itertools;
 use tracing::debug;
 use url::Url;
@@ -320,42 +322,47 @@ pub enum ColumnType {
 /// A transform is ultimately a `Struct` expr. This holds the set of expressions that make that struct expr up
 type Transform = Vec<TransformExpr>;
 
+/// Wrapper for ExpressionRef that implements Hash and Eq based on Arc pointer equality
+#[derive(Debug, Clone)]
+struct PtrEqExpressionRef(ExpressionRef);
+
+impl Hash for PtrEqExpressionRef {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        (Arc::as_ptr(&self.0) as usize).hash(state);
+    }
+}
+
+impl PartialEq for PtrEqExpressionRef {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for PtrEqExpressionRef {}
+
 /// A cache for deduplicating transform expressions to save memory
 #[derive(Debug, Clone)]
 pub struct TransformCache {
-    /// Vector of unique transform expressions for indexed access
-    transforms_vec: Vec<ExpressionRef>,
+    transforms: IndexSet<PtrEqExpressionRef>,
 }
 
 impl TransformCache {
-    /// Create a new empty transform cache
     pub fn new() -> Self {
         Self {
-            transforms_vec: Vec::new(),
+            transforms: IndexSet::new(),
         }
     }
 
     /// Get or insert a transform expression, returning its index
-    ///
-    /// This does a linear search to find existing transforms. While not optimal
-    /// for very large numbers of unique transforms, in practice the number of
-    /// unique transforms is typically small (e.g., one per partition value).
     pub fn get_or_insert(&mut self, transform: ExpressionRef) -> usize {
-        // Check if we already have this transform
-        for (idx, existing) in self.transforms_vec.iter().enumerate() {
-            if Arc::ptr_eq(existing, &transform) {
-                return idx;
-            }
-        }
-        // Not found, add it
-        let idx = self.transforms_vec.len();
-        self.transforms_vec.push(transform);
+        let wrapped = PtrEqExpressionRef(transform);
+        let (idx, _inserted) = self.transforms.insert_full(wrapped);
         idx
     }
 
     /// Get a transform by its index
     pub fn get(&self, idx: usize) -> Option<&ExpressionRef> {
-        self.transforms_vec.get(idx)
+        self.transforms.get_index(idx).map(|wrapped| &wrapped.0)
     }
 }
 
