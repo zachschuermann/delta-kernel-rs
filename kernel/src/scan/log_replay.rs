@@ -7,7 +7,7 @@ use std::sync::{Arc, LazyLock};
 use itertools::Itertools;
 
 use super::data_skipping::DataSkippingFilter;
-use super::{ScanMetadata, Transform, TransformCache};
+use super::{ScanMetadata, Transform};
 use crate::actions::deletion_vector::DeletionVectorDescriptor;
 use crate::actions::get_log_add_schema;
 use crate::engine_data::{GetData, RowVisitor, TypedGetData as _};
@@ -87,10 +87,9 @@ struct AddRemoveDedupVisitor<'seen> {
     logical_schema: SchemaRef,
     transform: Option<Arc<Transform>>,
     partition_filter: Option<PredicateRef>,
-    transform_cache: TransformCache,
-    transform_indices: Vec<Option<usize>>,
-    // cache partition value combinations to transform indices
-    partition_cache: HashMap<u64, usize>,
+    row_transform_exprs: Vec<Option<ExpressionRef>>,
+    // cache partition value combinations to transform expressions
+    partition_cache: HashMap<u64, ExpressionRef>,
 }
 
 impl AddRemoveDedupVisitor<'_> {
@@ -123,8 +122,7 @@ impl AddRemoveDedupVisitor<'_> {
             logical_schema,
             transform,
             partition_filter,
-            transform_cache: TransformCache::new(),
-            transform_indices: Vec::new(),
+            row_transform_exprs: Vec::new(),
             partition_cache: HashMap::new(),
         }
     }
@@ -266,23 +264,20 @@ impl AddRemoveDedupVisitor<'_> {
                 // Convert to sorted Vec for cache key
                 let cache_key = self.partition_values_to_cache_key(&raw_partition_values);
 
-                use std::collections::hash_map::Entry;
-                let idx = match self.partition_cache.entry(cache_key) {
-                    Entry::Occupied(entry) => *entry.get(),
-                    Entry::Vacant(entry) => {
+                let transform_expr = match self.partition_cache.get(&cache_key) {
+                    Some(cached_expr) => cached_expr.clone(),
+                    None => {
                         // cache miss - build new transform
-                        let cache_key = *entry.key();
                         let transform_expr =
                             self.get_transform_expr(transform, parsed_partition_values)?;
-                        let idx = self.transform_cache.get_or_insert(transform_expr);
-                        self.partition_cache.insert(cache_key, idx);
-                        idx
+                        self.partition_cache.insert(cache_key, transform_expr.clone());
+                        transform_expr
                     }
                 };
 
                 // fill in any needed `None`s for previous rows
-                self.transform_indices.resize_with(i, Default::default);
-                self.transform_indices.push(Some(idx));
+                self.row_transform_exprs.resize_with(i, Default::default);
+                self.row_transform_exprs.push(Some(transform_expr));
             }
         }
         Ok(true)
@@ -419,8 +414,7 @@ impl LogReplayProcessor for ScanLogReplayProcessor {
         Ok(ScanMetadata::new(
             result,
             visitor.selection_vector,
-            Arc::new(visitor.transform_cache),
-            visitor.transform_indices,
+            visitor.row_transform_exprs,
         ))
     }
 
@@ -533,7 +527,7 @@ mod tests {
         for res in iter {
             let scan_metadata = res.unwrap();
             assert!(
-                scan_metadata.scan_file_transform_indices.is_empty(),
+                scan_metadata.scan_file_transforms.is_empty(),
                 "Should have no transforms"
             );
         }
@@ -584,12 +578,7 @@ mod tests {
 
         for res in iter {
             let scan_metadata = res.unwrap();
-            // Extract transforms from the cache
-            let transforms: Vec<_> = scan_metadata
-                .scan_file_transform_indices
-                .iter()
-                .map(|idx| scan_metadata.transform_cache.get(*idx.as_ref()?).cloned())
-                .collect();
+            let transforms = scan_metadata.scan_file_transforms;
             // in this case we have a metadata action first and protocol 3rd, so we expect 4 items,
             // the first and 3rd being a `None`
             assert_eq!(transforms.len(), 4, "Should have 4 transforms");

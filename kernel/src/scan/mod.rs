@@ -2,11 +2,9 @@
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
-use std::hash::{Hash, Hasher};
 use std::sync::{Arc, LazyLock};
 
 use delta_kernel_derive::internal_api;
-use indexmap::IndexSet;
 use itertools::Itertools;
 use tracing::debug;
 use url::Url;
@@ -322,66 +320,14 @@ pub enum ColumnType {
 /// A transform is ultimately a `Struct` expr. This holds the set of expressions that make that struct expr up
 type Transform = Vec<TransformExpr>;
 
-/// Wrapper for ExpressionRef that implements Hash and Eq based on Arc pointer equality
-#[derive(Debug, Clone)]
-struct PtrEqExpressionRef(ExpressionRef);
-
-impl Hash for PtrEqExpressionRef {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        (Arc::as_ptr(&self.0) as usize).hash(state);
-    }
-}
-
-impl PartialEq for PtrEqExpressionRef {
-    fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
-    }
-}
-
-impl Eq for PtrEqExpressionRef {}
-
-/// A cache for deduplicating transform expressions to save memory
-#[derive(Debug, Clone)]
-pub struct TransformCache {
-    transforms: IndexSet<PtrEqExpressionRef>,
-}
-
-impl TransformCache {
-    pub fn new() -> Self {
-        Self {
-            transforms: IndexSet::new(),
-        }
-    }
-
-    /// Get or insert a transform expression, returning its index
-    pub fn get_or_insert(&mut self, transform: ExpressionRef) -> usize {
-        let wrapped = PtrEqExpressionRef(transform);
-        let (idx, _inserted) = self.transforms.insert_full(wrapped);
-        idx
-    }
-
-    /// Get a transform by its index
-    pub fn get(&self, idx: usize) -> Option<&ExpressionRef> {
-        self.transforms.get_index(idx).map(|wrapped| &wrapped.0)
-    }
-}
-
-impl Default for TransformCache {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 /// utility method making it easy to get a transform for a particular row. If the requested row is
 /// outside the range of the passed slice returns `None`, otherwise returns the element at the index
 /// of the specified row
 pub fn get_transform_for_row(
     row: usize,
-    transform_indices: &[Option<usize>],
-    transform_cache: &TransformCache,
+    transforms: &[Option<ExpressionRef>],
 ) -> Option<ExpressionRef> {
-    let idx = transform_indices.get(row)?.as_ref()?;
-    transform_cache.get(*idx).cloned()
+    transforms.get(row).cloned().flatten()
 }
 
 /// Transforms aren't computed all at once. So static ones can just go straight to `Expression`, but
@@ -393,42 +339,39 @@ pub(crate) enum TransformExpr {
 }
 
 /// [`ScanMetadata`] contains (1) a batch of [`FilteredEngineData`] specifying data files to be scanned
-/// and (2) a cache of transforms with indices indicating which transform to apply to each file.
+/// and (2) a vector of transforms (one transform per scan file) that must be applied to the data read
+/// from those files.
 pub struct ScanMetadata {
     /// Filtered engine data with one row per file to scan (and only selected rows should be scanned)
     pub scan_files: FilteredEngineData,
 
-    /// Cache containing all unique transform expressions
-    pub transform_cache: Arc<TransformCache>,
-
-    /// Indices into the transform cache for each scan file.
+    /// Row-level transformations to apply to data read from files.
     ///
     /// Each entry in this vector corresponds to a row in the `scan_files` data. The entry is an
-    /// optional index into the `transform_cache` that specifies which transform to apply:
+    /// optional expression that must be applied to convert the file's data into the logical schema
+    /// expected by the scan:
     ///
-    /// - `Some(idx)`: Apply the transform at index `idx` in the cache to match
+    /// - `Some(expr)`: Apply this expression to transform the data to match
     ///   [`Scan::logical_schema()`].
     /// - `None`: No transformation is needed; the data is already in the correct logical form.
     ///
     /// Note: This vector can be indexed by row number, as rows masked by the selection vector will
     /// have corresponding entries that will be `None`.
-    pub scan_file_transform_indices: Vec<Option<usize>>,
+    pub scan_file_transforms: Vec<Option<ExpressionRef>>,
 }
 
 impl ScanMetadata {
     fn new(
         data: Box<dyn EngineData>,
         selection_vector: Vec<bool>,
-        transform_cache: Arc<TransformCache>,
-        scan_file_transform_indices: Vec<Option<usize>>,
+        scan_file_transforms: Vec<Option<ExpressionRef>>,
     ) -> Self {
         Self {
             scan_files: FilteredEngineData {
                 data,
                 selection_vector,
             },
-            transform_cache,
-            scan_file_transform_indices,
+            scan_file_transforms,
         }
     }
 }
