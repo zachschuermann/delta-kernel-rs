@@ -75,6 +75,22 @@ impl ScanLogReplayProcessor {
     }
 }
 
+/// A representation of partition values for use as a cache key. This is just a sorted vector of
+/// raw partition key-value pairs.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct PartitionValues(Vec<(String, String)>);
+
+impl PartitionValues {
+    /// Create a new `PartitionValues` from raw HashMap of partition values (sorts entries). Note
+    /// that although sorting sounds painful, this is usually a very small number of entries (just
+    /// the number of partition columns in the table).
+    fn from_map(map: HashMap<String, String>) -> Self {
+        let mut entries: Vec<(String, String)> = map.into_iter().collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        Self(entries)
+    }
+}
+
 /// A visitor that deduplicates a stream of add and remove actions into a stream of valid adds. Log
 /// replay visits actions newest-first, so once we've seen a file action for a given (path, dvId)
 /// pair, we should ignore all subsequent (older) actions for that same (path, dvId) pair. If the
@@ -86,9 +102,12 @@ struct AddRemoveDedupVisitor<'seen> {
     transform: Option<Arc<Transform>>,
     partition_filter: Option<PredicateRef>,
     row_transform_exprs: Vec<Option<ExpressionRef>>,
-    // cache partition value combinations to transform expressions
-    // Using sorted Vec as key to ensure correctness (no hash collisions)
-    partition_cache: HashMap<Vec<(String, String)>, ExpressionRef>,
+    // Cache partition value combinations to transform expressions so we avoid re-creating
+    // transform Expressions for the same partition values. The size of this cache is O(N) where N =
+    // number of unique partition value combinations in an ActionsBatch. To be clear, this _is_ a
+    // cartesian product of partition values, but at worse is the same size as row_transform_exprs
+    // (unique for every row).
+    partition_cache: HashMap<PartitionValues, ExpressionRef>,
 }
 
 impl AddRemoveDedupVisitor<'_> {
@@ -244,22 +263,18 @@ impl AddRemoveDedupVisitor<'_> {
         }
         if let Some(transform) = self.transform.as_ref() {
             if let Some(raw_partition_values) = raw_partition_values {
-                // Convert HashMap to sorted Vec for use as cache key
-                // This ensures correctness - no hash collision issues
-                let mut cache_key: Vec<(String, String)> =
-                    raw_partition_values.into_iter().collect();
-                cache_key.sort_by(|a, b| a.0.cmp(&b.0));
+                // create cache key from partition values (just sorted partition values)
+                let cache_key = PartitionValues::from_map(raw_partition_values);
 
-                let transform_expr = match self.partition_cache.get(&cache_key) {
-                    Some(cached_expr) => cached_expr.clone(),
-                    None => {
-                        // cache miss - build new transform
-                        let transform_expr =
-                            self.get_transform_expr(transform, parsed_partition_values)?;
-                        self.partition_cache
-                            .insert(cache_key, transform_expr.clone());
-                        transform_expr
-                    }
+                let transform_expr = if let Some(cached) = self.partition_cache.get(&cache_key) {
+                    cached.clone()
+                } else {
+                    // missed: have to compute the transform expression
+                    let transform_expr =
+                        self.get_transform_expr(transform, parsed_partition_values)?;
+                    self.partition_cache
+                        .insert(cache_key, transform_expr.clone());
+                    transform_expr
                 };
 
                 // fill in any needed `None`s for previous rows
