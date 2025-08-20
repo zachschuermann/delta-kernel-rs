@@ -1,7 +1,5 @@
 use std::clone::Clone;
-use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
-use std::hash::{Hash, Hasher};
 use std::sync::{Arc, LazyLock};
 
 use itertools::Itertools;
@@ -89,7 +87,8 @@ struct AddRemoveDedupVisitor<'seen> {
     partition_filter: Option<PredicateRef>,
     row_transform_exprs: Vec<Option<ExpressionRef>>,
     // cache partition value combinations to transform expressions
-    partition_cache: HashMap<u64, ExpressionRef>,
+    // Using sorted Vec as key to ensure correctness (no hash collisions)
+    partition_cache: HashMap<Vec<(String, String)>, ExpressionRef>,
 }
 
 impl AddRemoveDedupVisitor<'_> {
@@ -183,22 +182,6 @@ impl AddRemoveDedupVisitor<'_> {
         Ok(Arc::new(Expression::Struct(transforms)))
     }
 
-    /// Create a hash-based cache key from partition values
-    fn partition_values_to_cache_key(&self, partition_values: &HashMap<String, String>) -> u64 {
-        let mut hasher = DefaultHasher::new();
-
-        // Sort keys to ensure deterministic hashing
-        let mut keys: Vec<_> = partition_values.keys().collect();
-        keys.sort();
-
-        for key in keys {
-            key.hash(&mut hasher);
-            partition_values[key].hash(&mut hasher);
-        }
-
-        hasher.finish()
-    }
-
     fn is_file_partition_pruned(
         &self,
         partition_values: &HashMap<usize, (String, Scalar)>,
@@ -261,8 +244,11 @@ impl AddRemoveDedupVisitor<'_> {
         }
         if let Some(transform) = self.transform.as_ref() {
             if let Some(raw_partition_values) = raw_partition_values {
-                // Convert to sorted Vec for cache key
-                let cache_key = self.partition_values_to_cache_key(&raw_partition_values);
+                // Convert HashMap to sorted Vec for use as cache key
+                // This ensures correctness - no hash collision issues
+                let mut cache_key: Vec<(String, String)> =
+                    raw_partition_values.into_iter().collect();
+                cache_key.sort_by(|a, b| a.0.cmp(&b.0));
 
                 let transform_expr = match self.partition_cache.get(&cache_key) {
                     Some(cached_expr) => cached_expr.clone(),
@@ -270,7 +256,8 @@ impl AddRemoveDedupVisitor<'_> {
                         // cache miss - build new transform
                         let transform_expr =
                             self.get_transform_expr(transform, parsed_partition_values)?;
-                        self.partition_cache.insert(cache_key, transform_expr.clone());
+                        self.partition_cache
+                            .insert(cache_key, transform_expr.clone());
                         transform_expr
                     }
                 };
