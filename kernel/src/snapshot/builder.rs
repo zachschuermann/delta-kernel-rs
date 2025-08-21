@@ -1,6 +1,7 @@
 //! Builder for creating [`Snapshot`] instances.
 
 use crate::log_segment::LogSegment;
+use crate::path::ParsedLogPath;
 use crate::{DeltaResult, Engine, Snapshot, Version};
 
 use url::Url;
@@ -25,11 +26,24 @@ use url::Url;
 /// ```
 pub struct SnapshotBuilder {
     table_root: Url,
+    log_tail: Vec<ParsedLogPath>,
 }
+
+pub struct LogPath(ParsedLogPath);
 
 impl SnapshotBuilder {
     pub(crate) fn new(table_root: Url) -> Self {
-        Self { table_root }
+        Self {
+            table_root,
+            log_tail: vec![],
+        }
+    }
+
+    // NOTE: this is where we 'stop' log_tail from being public
+    #[cfg(feature = "catalog-managed")]
+    pub fn with_log_tail(mut self, log_tail: impl IntoIterator<Item = LogPath>) -> Self {
+        self.log_tail = log_tail.into_iter().map(|p| p.0).collect();
+        self
     }
 
     /// Create a new [`Snapshot`] instance for a specific version of the table.
@@ -53,6 +67,7 @@ impl SnapshotBuilder {
 
     fn build(self, version: Option<Version>, engine: &dyn Engine) -> DeltaResult<Snapshot> {
         let log_segment = LogSegment::build(self.table_root.join("_delta_log/")?)
+            .with_log_tail(self.log_tail)
             .with_end_version_opt(version)
             .build_complete(engine.storage_handler().as_ref())?;
 

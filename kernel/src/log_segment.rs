@@ -80,6 +80,7 @@ pub(crate) struct LogSegment {
 #[internal_api]
 pub(crate) struct LogSegmentBuilder {
     log_root: Url,
+    log_tail: Vec<ParsedLogPath>,
     end_version: Option<Version>,
 }
 
@@ -87,8 +88,18 @@ impl LogSegmentBuilder {
     fn new(log_root: Url) -> Self {
         LogSegmentBuilder {
             log_root,
+            log_tail: vec![],
             end_version: None,
         }
+    }
+
+    /// Sets the log tail for the log segment.
+    pub(crate) fn with_log_tail(
+        mut self,
+        log_tail: impl IntoIterator<Item = ParsedLogPath>,
+    ) -> Self {
+        self.log_tail = log_tail.into_iter().collect();
+        self
     }
 
     /// Sets the end version for the log segment. This is optional, and if not set, the LogSegment
@@ -124,28 +135,29 @@ impl LogSegmentBuilder {
         last_checkpoint_hint: Option<LastCheckpointHint>,
     ) -> DeltaResult<LogSegment> {
         let listed_files = match (last_checkpoint_hint, self.end_version) {
-            (Some(cp), None) => {
-                // TODO: use log tail
-                ListedLogFiles::list_with_checkpoint_hint(
-                    &cp,
-                    storage,
-                    &self.log_root,
-                    vec![],
-                    None,
-                )?
-            }
+            (Some(cp), None) => ListedLogFiles::list_with_checkpoint_hint(
+                &cp,
+                storage,
+                &self.log_root,
+                self.log_tail,
+                None,
+            )?,
             (Some(cp), Some(end_version)) if cp.version <= end_version => {
-                // TODO: use log tail
                 ListedLogFiles::list_with_checkpoint_hint(
                     &cp,
                     storage,
                     &self.log_root,
-                    vec![],
+                    self.log_tail,
                     Some(end_version),
                 )?
             }
-            // TODO: use log tail
-            _ => ListedLogFiles::list(storage, &self.log_root, vec![], None, self.end_version)?,
+            _ => ListedLogFiles::list(
+                storage,
+                &self.log_root,
+                self.log_tail,
+                None,
+                self.end_version,
+            )?,
         };
 
         LogSegment::try_new(listed_files, self.log_root, self.end_version)
@@ -175,11 +187,10 @@ impl LogSegmentBuilder {
         }
 
         // TODO: compactions?
-        // TODO: use log tail
         let listed_files = ListedLogFiles::list_commits(
             storage,
             &self.log_root,
-            vec![],
+            self.log_tail,
             Some(start_version),
             self.end_version,
         )?;
@@ -229,11 +240,10 @@ impl LogSegmentBuilder {
 
         // this is a list of commits with possible gaps, we want to take the latest contiguous
         // chunk of commits
-        // TODO: use log tail
         let mut listed_commits = ListedLogFiles::list_commits(
             storage,
             &self.log_root,
-            vec![],
+            self.log_tail,
             start_from,
             Some(end_version),
         )?;

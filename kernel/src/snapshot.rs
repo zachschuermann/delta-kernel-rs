@@ -86,6 +86,8 @@ impl Snapshot {
     /// - `engine`: Implementation of [`Engine`] apis.
     /// - `version`: target version of the [`Snapshot`]. None will create a snapshot at the latest
     ///   version of the table.
+    //
+    // TODO: need to integrate with SnapshotBuilder and plumb through log_tail!
     pub fn try_new_from(
         existing_snapshot: Arc<Snapshot>,
         engine: &dyn Engine,
@@ -114,7 +116,7 @@ impl Snapshot {
         let listing_start = old_log_segment.checkpoint_version.unwrap_or(0) + 1;
 
         // Check for new commits (and CRC)
-        // TODO: use log_tail
+        // TODO: need to use log_tail!
         let new_listed_files = ListedLogFiles::list(
             storage.as_ref(),
             &log_root,
