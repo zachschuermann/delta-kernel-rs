@@ -125,17 +125,27 @@ impl LogSegmentBuilder {
     ) -> DeltaResult<LogSegment> {
         let listed_files = match (last_checkpoint_hint, self.end_version) {
             (Some(cp), None) => {
-                ListedLogFiles::list_with_checkpoint_hint(&cp, storage, &self.log_root, None)?
-            }
-            (Some(cp), Some(end_version)) if cp.version <= end_version => {
+                // TODO: use log tail
                 ListedLogFiles::list_with_checkpoint_hint(
                     &cp,
                     storage,
                     &self.log_root,
+                    vec![],
+                    None,
+                )?
+            }
+            (Some(cp), Some(end_version)) if cp.version <= end_version => {
+                // TODO: use log tail
+                ListedLogFiles::list_with_checkpoint_hint(
+                    &cp,
+                    storage,
+                    &self.log_root,
+                    vec![],
                     Some(end_version),
                 )?
             }
-            _ => ListedLogFiles::list(storage, &self.log_root, None, self.end_version)?,
+            // TODO: use log tail
+            _ => ListedLogFiles::list(storage, &self.log_root, vec![], None, self.end_version)?,
         };
 
         LogSegment::try_new(listed_files, self.log_root, self.end_version)
@@ -165,12 +175,15 @@ impl LogSegmentBuilder {
         }
 
         // TODO: compactions?
+        // TODO: use log tail
         let listed_files = ListedLogFiles::list_commits(
             storage,
             &self.log_root,
+            vec![],
             Some(start_version),
             self.end_version,
         )?;
+
         // - Here check that the start version is correct.
         // - [`LogSegment::try_new`] will verify that the `end_version` is correct if present.
         // - [`ListedLogFiles::list_commits`] also checks that there are no gaps between commits.
@@ -216,8 +229,14 @@ impl LogSegmentBuilder {
 
         // this is a list of commits with possible gaps, we want to take the latest contiguous
         // chunk of commits
-        let mut listed_commits =
-            ListedLogFiles::list_commits(storage, &self.log_root, start_from, Some(end_version))?;
+        // TODO: use log tail
+        let mut listed_commits = ListedLogFiles::list_commits(
+            storage,
+            &self.log_root,
+            vec![],
+            start_from,
+            Some(end_version),
+        )?;
 
         // remove gaps - return latest contiguous chunk of commits
         let commits = &mut listed_commits.ascending_commit_files;

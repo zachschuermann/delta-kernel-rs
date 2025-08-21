@@ -114,9 +114,11 @@ impl Snapshot {
         let listing_start = old_log_segment.checkpoint_version.unwrap_or(0) + 1;
 
         // Check for new commits (and CRC)
+        // TODO: use log_tail
         let new_listed_files = ListedLogFiles::list(
             storage.as_ref(),
             &log_root,
+            vec![],
             Some(listing_start),
             new_version,
         )?;
