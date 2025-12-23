@@ -613,4 +613,25 @@ impl LogSegment {
         );
         Ok(())
     }
+
+    /// Publish the log segment by attempting to publish all staged commits in order. Note that we
+    /// _must_ publish in order, as publishing out of order can lead to gaps in the log (breaking
+    /// old readers).
+    ///
+    /// This is a no-op if there are no staged commits in this log segment. It returns Ok(()) if
+    /// all commits are published up to and including the end version of this log segment.
+    //
+    // TODO: in the future what if we returned a struct which you can iterate over to publish?
+    // would give more control?
+    pub(crate) fn publish(&self, engine: &dyn Engine) -> DeltaResult<()> {
+        for staged_commit in self
+            .ascending_commit_files
+            .iter()
+            .filter(|commit| matches!(commit.file_type, LogPathFileType::StagedCommit))
+        {
+            // Pass the table root (stored as log_root) to the publish method
+            staged_commit.publish(&self.log_root, engine)?;
+        }
+        Ok(())
+    }
 }

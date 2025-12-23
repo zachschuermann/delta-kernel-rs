@@ -413,6 +413,11 @@ impl Snapshot {
             None => Err(Error::generic("Last commit file not found in log segment")),
         }
     }
+
+    #[cfg(feature = "catalog-managed")]
+    pub fn publish(self: Arc<Self>, engine: &dyn Engine) -> DeltaResult<()> {
+        self.log_segment.publish(engine)
+    }
 }
 
 #[cfg(test)]

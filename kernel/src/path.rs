@@ -262,6 +262,49 @@ impl ParsedLogPath<FileMeta> {
     }
 }
 
+impl<Location: AsUrl> ParsedLogPath<Location> {
+    /// Publish a commit at the specified log path. Effectively, this means copying the log file
+    /// from staged commits directory to the delta log root as a published delta. See the
+    /// [catalog-managed RFC] for details on publishing.
+    ///
+    /// Currently only staged commits are allowed to be published.
+    ///
+    /// [catalog-managed RFC]: https://github.com/delta-io/delta/blob/master/protocol_rfcs/catalog-managed.md
+    pub(crate) fn publish(
+        &self,
+        table_root: &Url,
+        engine: &dyn Engine,
+    ) -> DeltaResult<ParsedLogPath<Url>> {
+        if !matches!(self.file_type, LogPathFileType::StagedCommit) {
+            return Err(Error::generic(format!(
+                "Only staged commits can be published. Attempted to publish a file of type {:?}",
+                self.file_type
+            )));
+        }
+
+        // Convert staged commit path to published commit path
+        // From: _delta_log/_staged_commits/00000000000000000010.{uuid}.json
+        // To:   _delta_log/00000000000000000010.json
+        let src = self.location.as_url();
+
+        // Create the published commit path using just the version
+        let dest_path = ParsedLogPath::new_commit(table_root, self.version)?;
+        let dest = dest_path.location;
+
+        match engine.storage_handler().copy_atomic(src, &dest) {
+            Ok(()) => ParsedLogPath::try_from(dest).and_then(|opt| {
+                opt.ok_or_else(|| {
+                    Error::internal_error("Published commit path is not a valid log path")
+                })
+            }),
+            Err(Error::FileAlreadyExists(e)) => Err(Error::generic(format!(
+                "Published commit already exists: {e}"
+            ))),
+            Err(e) => Err(e),
+        }
+    }
+}
+
 impl ParsedLogPath<Url> {
     /// Helper method to create a path with the given filename generator
     fn create_path(table_root: &Url, filename: String) -> DeltaResult<Self> {
